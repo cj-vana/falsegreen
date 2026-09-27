@@ -67,6 +67,19 @@ export function isModified(root: string, path: string): boolean {
   }
 }
 
+/** Tracked paths that differ from HEAD (staged or not); untracked files are not listed. */
+export function modifiedTracked(root: string): string[] {
+  return git(root, ['status', '--porcelain=v1', '-uno', '-z'])
+    .split('\0')
+    .filter((entry) => entry.length > 3)
+    .map((entry) => entry.slice(3));
+}
+
+/** Puts paths back to their HEAD content, in the index and the working tree. */
+export function restoreFromHead(root: string, paths: string[]): void {
+  if (paths.length > 0) git(root, ['checkout', 'HEAD', '--', ...paths]);
+}
+
 export function addIntentToAdd(root: string, paths: string[]): void {
   if (paths.length > 0) git(root, ['add', '--intent-to-add', '--', ...paths]);
 }

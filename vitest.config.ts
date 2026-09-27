@@ -2,7 +2,7 @@ import { mkdirSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
-import { defineConfig } from 'vitest/config';
+import { configDefaults, defineConfig } from 'vitest/config';
 
 // Everything the tests write (temp repos, fixture copies, planted faults) stays
 // inside this checkout. Workers inherit TMPDIR, so os.tmpdir() lands here too.
@@ -13,6 +13,8 @@ process.env.TMPDIR = tmp;
 export default defineConfig({
   test: {
     include: ['test/**/*.test.ts'],
+    // Fixture repositories carry their own test files; they run only inside fixture tests.
+    exclude: [...configDefaults.exclude, 'test/fixtures/**'],
     environment: 'node',
     // Fixture tests run real toolchains (cargo, gradle) against planted faults.
     testTimeout: 300_000,

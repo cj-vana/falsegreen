@@ -1,0 +1,7 @@
+{
+  "gates": [
+    { "job": "test", "step": "Run npm test", "tool": "vitest", "reach": "caught", "semantic": "caught" },
+    { "job": "test", "step": "Run npx vitest run || true", "tool": "vitest", "reach": "survived", "semantic": "survived" }
+  ],
+  "static": [{ "rule": "masked-exit", "step": "Run npx vitest run || true" }]
+}

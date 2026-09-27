@@ -77,6 +77,26 @@ export type Language = 'js' | 'python' | 'go' | 'rust' | 'jvm' | 'any';
 
 export type Category = 'test' | 'types' | 'lint' | 'format' | 'compile';
 
+export interface FaultContext {
+  root: string;
+  /** Tracked files, repo-relative; placement only ever picks from these. */
+  tracked: string[];
+  invocation: ToolInvocation;
+  marker: Marker;
+  /** Directory from `place:` in the config, when set for this tool. */
+  place?: string;
+  /** Reads a repo-relative file. */
+  read(path: string): string;
+}
+
+export interface ToolDef {
+  id: ToolId;
+  language: Language;
+  category: Category;
+  /** The fault for one tier, or why none can be planted for this invocation. */
+  faults(ctx: FaultContext, tier: Tier): Fault | { skip: string };
+}
+
 /** One recognized tool inside a step's command. */
 export interface ToolInvocation {
   tool: ToolId;
