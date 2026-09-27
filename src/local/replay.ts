@@ -75,7 +75,25 @@ function unjudgedReason(r: ProcResult, timeoutMs: number): string | undefined {
 }
 
 /** Why the step must not be replayed at all, checked before anything runs. */
-function refusal(gate: Gate): string | undefined {
+export function faultContext(
+  root: string,
+  tracked: string[],
+  invocation: ToolInvocation,
+  marker: Marker,
+  cfg: ResolvedConfig,
+): FaultContext {
+  const place = cfg.place.find((p) => p.tool === invocation.tool)?.dir;
+  return {
+    root,
+    tracked,
+    invocation,
+    marker,
+    ...(place === undefined ? {} : { place }),
+    read: (p) => readFileSync(join(root, p), 'utf8'),
+  };
+}
+
+export function refusal(gate: Gate): string | undefined {
   if (gate.kind === 'uses') return 'runs a GitHub Action; use falsegreen remote to judge it';
   if (gate.unsafe !== undefined)
     return `the step also runs \`${gate.unsafe}\`, which falsegreen never replays`;
@@ -148,16 +166,7 @@ async function replayGate(
         continue;
       }
       const marker = (opts.marker ?? newMarker)();
-      const place = cfg.place.find((p) => p.tool === inv.tool)?.dir;
-      const ctx: FaultContext = {
-        root,
-        tracked,
-        invocation: inv,
-        marker,
-        ...(place === undefined ? {} : { place }),
-        read: (p) => readFileSync(join(root, p), 'utf8'),
-      };
-      const fault = def.faults(ctx, tier);
+      const fault = def.faults(faultContext(root, tracked, inv, marker, cfg), tier);
       if ('skip' in fault) {
         result.runs.push(faultRun(inv, tier, 'unjudged', fault.skip));
         continue;

@@ -13,7 +13,7 @@ import { replayGates, type GateResult } from '../../src/local/replay';
 import { resolveAll } from '../../src/resolve/gates';
 import { staticFindings } from '../../src/static/rules';
 import { loadWorkflows } from '../../src/workflow/parse';
-import { makeRepo } from './repo';
+import { makeRepo, type TempRepo } from './repo';
 
 export const FIXTURES = join(import.meta.dirname, '..', 'fixtures');
 
@@ -36,6 +36,17 @@ export function fixtureNames(): string[] {
 
 export function expected(name: string): Expected {
   return JSON.parse(readFileSync(join(FIXTURES, name, 'expected.json'), 'utf8')) as Expected;
+}
+
+/** A committed copy of a fixture repository under tmp/; the caller removes it. */
+export function copyFixture(name: string): TempRepo {
+  const repo = makeRepo();
+  cpSync(join(FIXTURES, name), repo.root, {
+    recursive: true,
+    filter: (src) => !src.endsWith('expected.json'),
+  });
+  repo.commitAll('fixture');
+  return repo;
 }
 
 export interface FixtureRun {
