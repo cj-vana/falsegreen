@@ -72,7 +72,17 @@ function withReports(cmd: Command): Command {
       new Option('--log-level <level>', 'progress output')
         .choices(['silent', 'info'])
         .default('info'),
-    );
+    )
+    .addOption(
+      new Option(
+        '--required-checks <mode>',
+        'read branch protection and rulesets through the GitHub API',
+      )
+        .choices(['auto', 'off'])
+        .default('auto'),
+    )
+    .option('--branch <name>', 'branch whose required checks apply (default: the default branch)')
+    .option('--token-env <name>', 'environment variable holding the GitHub token');
 }
 
 function withReplay(cmd: Command): Command {
@@ -98,6 +108,9 @@ interface RunOpts extends CommonOpts {
   out: string;
   formats: string;
   logLevel: 'silent' | 'info';
+  requiredChecks: 'auto' | 'off';
+  branch?: string;
+  tokenEnv?: string;
   tier?: 'reach' | 'semantic' | 'both';
   assumeGreen?: boolean;
   timeout?: string;
@@ -146,6 +159,9 @@ export function buildProgram(io: CliIO = defaultIO()): Command {
           out: o.out,
           formats: parseFormats(o.formats),
           quiet: o.logLevel === 'silent',
+          requiredChecks: o.requiredChecks,
+          ...(o.branch === undefined ? {} : { branch: o.branch }),
+          ...(o.tokenEnv === undefined ? {} : { tokenEnv: o.tokenEnv }),
         },
         io,
       );

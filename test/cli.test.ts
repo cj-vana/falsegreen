@@ -72,6 +72,25 @@ describe('cli basics', () => {
     expect(r.code).toBe(1);
   });
 
+  it('accepts the required-check options and rejects a bad mode', async () => {
+    repo = copyFixture('js-vitest');
+    const out = join(makeTempDir('report'), 'r');
+    const ok = await cli([
+      'static',
+      '--cwd',
+      repo.root,
+      '--out',
+      out,
+      '--required-checks',
+      'off',
+      '--branch',
+      'main',
+    ]);
+    expect(ok.code).toBe(1);
+    const bad = await cli(['static', '--cwd', repo.root, '--required-checks', 'sometimes']);
+    expect(bad.err).toMatch(/sometimes/);
+  });
+
   it('rejects an unknown report format', async () => {
     repo = copyFixture('js-vitest');
     const r = await cli(['static', '--cwd', repo.root, '--formats', 'json,xml']);
