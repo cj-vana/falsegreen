@@ -436,7 +436,13 @@ function cargoMemberDir(root: string, name: string): string | undefined {
 function rust(argv: string[], ctx: Ctx): ToolInvocation[] | undefined {
   if (argv[0] !== 'cargo') return undefined;
   const rest = argv.slice(1).filter((a) => !a.startsWith('+'));
-  const subIndex = rest.findIndex((a) => !a.startsWith('-'));
+  // Options cargo takes before the subcommand whose value is a separate word (`cargo --help`).
+  const globalValueFlags = ['--color', '--config', '--explain', '-C', '-Z'];
+  let subIndex = -1;
+  for (let i = 0; i < rest.length && subIndex < 0; i++) {
+    if (globalValueFlags.includes(rest[i]!)) i++;
+    else if (!rest[i]!.startsWith('-')) subIndex = i;
+  }
   const sub = rest[subIndex];
   const dash = argv.indexOf('--');
   const own = dash < 0 ? argv : argv.slice(0, dash);
@@ -447,12 +453,13 @@ function rust(argv: string[], ctx: Ctx): ToolInvocation[] | undefined {
     const dir = cargoMemberDir(ctx.root, pkg);
     if (dir !== undefined) paths.push(dir);
   }
-  const manifest = flagValue(own, ['--manifest-path']);
+  const manifest = flagValue(own, ['-m', '--manifest-path']);
   if (manifest !== undefined) paths.push(repoPath(ctx.cwd, dirname(manifest)));
 
   const inv = (tool: ToolId): ToolInvocation[] => [invocation(tool, argv, ctx, paths)];
   switch (sub) {
     case 'test':
+    case 't':
       return inv('cargo-test');
     case 'nextest':
       return rest[subIndex + 1] === 'run' ? inv('cargo-nextest') : [];
@@ -461,7 +468,9 @@ function rust(argv: string[], ctx: Ctx): ToolInvocation[] | undefined {
     case 'fmt':
       return has(argv, '--check') ? inv('cargo-fmt') : [];
     case 'check':
+    case 'c':
     case 'build':
+    case 'b':
       return inv('cargo-check');
   }
   return [];

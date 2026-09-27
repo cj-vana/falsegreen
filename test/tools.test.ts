@@ -158,6 +158,11 @@ describe('identify: Rust', () => {
     ['cargo fmt', []],
     ['cargo check', ['cargo-check']],
     ['cargo build --release', ['cargo-check']],
+    ['cargo t', ['cargo-test']],
+    ['cargo c --all-targets', ['cargo-check']],
+    ['cargo b', ['cargo-check']],
+    ['cargo --color always test', ['cargo-test']],
+    ['cargo --config net.offline=true clippy -- -D warnings', ['cargo-clippy']],
   ])('%s', (cmd, expected) => {
     expect(tools(cmd)).toEqual(expected);
   });
@@ -165,6 +170,7 @@ describe('identify: Rust', () => {
   it('maps -p to the member directory', () => {
     expect(one('cargo test -p b-core')!.pathArgs).toEqual(['crates/b']);
     expect(one('cargo test --manifest-path crates/b/Cargo.toml')!.pathArgs).toEqual(['crates/b']);
+    expect(one('cargo check -m crates/b/Cargo.toml')!.pathArgs).toEqual(['crates/b']);
   });
 });
 

@@ -1,0 +1,14 @@
+{
+  "requires": ["cargo", "cargo-clippy", "cargo-fmt", "cargo-nextest", "cc"],
+  "gates": [
+    { "job": "rust", "step": "Run cargo test", "tool": "cargo-test", "reach": "caught", "semantic": "caught" },
+    { "job": "rust", "step": "Run cargo test --lib", "tool": "cargo-test", "reach": "caught", "semantic": "caught" },
+    { "job": "rust", "step": "Run cargo nextest run", "tool": "cargo-nextest", "reach": "caught", "semantic": "caught" },
+    { "job": "rust", "step": "Run cargo clippy", "tool": "cargo-clippy", "reach": "caught", "semantic": "survived" },
+    { "job": "rust", "step": "Run cargo clippy -- -D warnings", "tool": "cargo-clippy", "reach": "caught", "semantic": "caught" },
+    { "job": "rust", "step": "Clippy with RUSTFLAGS", "tool": "cargo-clippy", "reach": "caught", "semantic": "caught" },
+    { "job": "rust", "step": "Run cargo fmt --check", "tool": "cargo-fmt", "reach": "caught", "semantic": "caught" },
+    { "job": "rust", "step": "Run cargo check", "tool": "cargo-check", "reach": "caught", "semantic": "unjudged" }
+  ],
+  "static": []
+}
