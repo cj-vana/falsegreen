@@ -23,6 +23,20 @@ if (EXTRA_PATH.length > 0) {
   process.env.PATH = [...EXTRA_PATH, process.env.PATH ?? ''].join(delimiter);
 }
 
+/** Tool caches default to the home directory; keep them in tmp/ unless the environment chose. */
+const cacheDir = (name: string): string => join(repoRoot, 'tmp', 'cache', name);
+const CACHE_DIRS: Record<string, string> = {
+  GOPATH: cacheDir('gopath'),
+  GOCACHE: cacheDir('go-build'),
+  GOMODCACHE: cacheDir('gopath/pkg/mod'),
+  GOLANGCI_LINT_CACHE: cacheDir('golangci-lint'),
+  GRADLE_USER_HOME: cacheDir('gradle-home'),
+  PRE_COMMIT_HOME: cacheDir('pre-commit'),
+  PYRIGHT_PYTHON_CACHE_DIR: cacheDir('pyright'),
+  MAVEN_ARGS: `-Dmaven.repo.local=${cacheDir('m2')}`,
+};
+for (const [key, value] of Object.entries(CACHE_DIRS)) process.env[key] ??= value;
+
 /** How to ask each tool whether it works (a present but unusable tool counts as missing). */
 const PROBES: Record<string, string[]> = {
   make: ['make', '--version'],
