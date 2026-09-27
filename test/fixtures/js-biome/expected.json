@@ -1,0 +1,9 @@
+{
+  "gates": [
+    { "job": "lint", "step": "Run npx biome ci .", "tool": "biome-lint", "reach": "caught", "semantic": "caught" },
+    { "job": "lint", "step": "Run npx biome ci .", "tool": "biome-format", "reach": "caught", "semantic": "caught" },
+    { "job": "lint", "step": "Run npx biome lint .", "tool": "biome-lint", "reach": "caught", "semantic": "survived" },
+    { "job": "lint", "step": "Run npx biome format .", "tool": "biome-format", "reach": "caught", "semantic": "caught" }
+  ],
+  "static": []
+}

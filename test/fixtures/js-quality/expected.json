@@ -1,0 +1,9 @@
+{
+  "gates": [
+    { "job": "quality", "step": "Run npm run typecheck", "tool": "tsc", "reach": "caught", "semantic": "caught" },
+    { "job": "quality", "step": "Run npm run lint", "tool": "eslint", "reach": "survived", "semantic": "survived" },
+    { "job": "quality", "step": "Run npm run format", "tool": "prettier", "reach": "caught", "semantic": "caught" },
+    { "job": "quality", "step": "Run npx vue-tsc --noEmit", "tool": "vue-tsc", "reach": "caught", "semantic": "caught" }
+  ],
+  "static": []
+}

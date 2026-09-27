@@ -26,8 +26,9 @@ describe.each(fixtureNames())('fixture %s', (name) => {
     async () => {
       const run = await runFixture(name);
 
+      // Tools come from the gate, not the runs, so a gate that was never judged still shows up.
       const actual = run.results.flatMap((r) =>
-        [...new Set(r.runs.map((x) => x.tool))].map((tool) => {
+        [...new Set(r.gate.invocations.map((i) => i.tool))].map((tool) => {
           const verdict = (tier: string) =>
             r.runs.find((x) => x.tool === tool && x.tier === tier)?.verdict;
           return {
@@ -36,7 +37,7 @@ describe.each(fixtureNames())('fixture %s', (name) => {
             tool,
             ...(verdict('reach') ? { reach: verdict('reach') } : {}),
             ...(verdict('semantic') ? { semantic: verdict('semantic') } : {}),
-            ...(r.status !== 'judged' ? { status: r.status, reason: r.reason } : {}),
+            ...(r.status !== 'judged' ? { status: r.status } : {}),
           };
         }),
       );

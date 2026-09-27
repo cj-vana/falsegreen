@@ -1,0 +1,7 @@
+{
+  "gates": [
+    { "job": "lint", "step": "Run npx oxlint", "tool": "oxlint", "reach": "caught", "semantic": "survived" },
+    { "job": "lint", "step": "Run npx oxlint --deny-warnings", "tool": "oxlint", "reach": "caught", "semantic": "caught" }
+  ],
+  "static": []
+}

@@ -1,0 +1,8 @@
+{
+  "requires": ["bun"],
+  "gates": [
+    { "job": "test", "step": "Run bun test", "tool": "bun-test", "reach": "caught", "semantic": "caught" },
+    { "job": "test", "step": "Test and report", "tool": "bun-test", "reach": "survived", "semantic": "survived" }
+  ],
+  "static": [{ "rule": "masked-exit", "step": "Test and report" }]
+}

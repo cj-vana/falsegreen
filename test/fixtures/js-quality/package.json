@@ -1,0 +1,10 @@
+{
+  "name": "fixture-js-quality",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "typecheck": "tsc --noEmit",
+    "lint": "eslint .",
+    "format": "prettier --check src"
+  }
+}

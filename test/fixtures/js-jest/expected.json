@@ -1,0 +1,13 @@
+{
+  "gates": [
+    { "job": "test", "step": "Run npm test", "tool": "jest", "reach": "caught", "semantic": "caught" },
+    {
+      "job": "test",
+      "step": "Run npx jest --ci --passWithNoTests integration",
+      "tool": "jest",
+      "reach": "survived",
+      "semantic": "survived"
+    }
+  ],
+  "static": [{ "rule": "passes-with-no-tests", "step": "Run npx jest --ci --passWithNoTests integration" }]
+}

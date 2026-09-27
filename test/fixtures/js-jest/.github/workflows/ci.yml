@@ -1,0 +1,10 @@
+name: CI
+on: push
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - run: npm test
+      # A path pattern that matches no test file, and a flag that turns "no tests" into a pass.
+      - run: npx jest --ci --passWithNoTests integration

@@ -1,0 +1,8 @@
+{
+  "name": "fixture-js-mocha",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "test": "mocha"
+  }
+}

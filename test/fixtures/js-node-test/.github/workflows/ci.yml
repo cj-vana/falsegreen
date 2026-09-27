@@ -1,0 +1,10 @@
+name: CI
+on: push
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - run: node --test
+      # The default shell has no pipefail: the step gets tee's exit status.
+      - run: node --test | tee test-output.txt

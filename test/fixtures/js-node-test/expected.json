@@ -1,0 +1,13 @@
+{
+  "gates": [
+    { "job": "test", "step": "Run node --test", "tool": "node-test", "reach": "caught", "semantic": "caught" },
+    {
+      "job": "test",
+      "step": "Run node --test | tee test-output.txt",
+      "tool": "node-test",
+      "reach": "survived",
+      "semantic": "survived"
+    }
+  ],
+  "static": [{ "rule": "pipe-swallows-exit", "step": "Run node --test | tee test-output.txt" }]
+}

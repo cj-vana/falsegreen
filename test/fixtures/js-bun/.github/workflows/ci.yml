@@ -1,0 +1,13 @@
+name: CI
+on: push
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - run: bun test
+      # bash -e ignores a failure before &&, so the script goes on to the next line and passes.
+      - name: Test and report
+        run: |
+          bun test && echo "tests passed"
+          echo "done"

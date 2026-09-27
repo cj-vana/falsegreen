@@ -1,0 +1,13 @@
+{
+  "gates": [
+    { "job": "test", "step": "Run npm test", "tool": "mocha", "reach": "caught", "semantic": "caught" },
+    {
+      "job": "test",
+      "step": "Run npx mocha || echo \"mocha failed\"",
+      "tool": "mocha",
+      "reach": "survived",
+      "semantic": "survived"
+    }
+  ],
+  "static": [{ "rule": "masked-exit", "step": "Run npx mocha || echo \"mocha failed\"" }]
+}

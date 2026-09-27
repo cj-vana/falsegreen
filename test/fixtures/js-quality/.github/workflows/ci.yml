@@ -1,0 +1,11 @@
+name: CI
+on: push
+jobs:
+  quality:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - run: npm run typecheck
+      - run: npm run lint
+      - run: npm run format
+      - run: npx vue-tsc --noEmit
