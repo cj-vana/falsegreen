@@ -1,0 +1,12 @@
+name: CI
+on: push
+jobs:
+  checks:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - name: Lint
+        run: sh scripts/lint.sh
+      - name: Check syntax
+        run: python3 -m compileall -q src || true
+      - uses: golangci/golangci-lint-action@v8

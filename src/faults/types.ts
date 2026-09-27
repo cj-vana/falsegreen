@@ -93,6 +93,8 @@ export interface ToolDef {
   id: ToolId;
   language: Language;
   category: Category;
+  /** Tiers this tool has faults for; both when unset. */
+  tiers?: Tier[];
   /** The fault for one tier, or why none can be planted for this invocation. */
   faults(ctx: FaultContext, tier: Tier): Fault | { skip: string };
 }

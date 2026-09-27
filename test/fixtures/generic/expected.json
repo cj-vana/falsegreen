@@ -1,0 +1,9 @@
+{
+  "requires": ["python3"],
+  "gates": [
+    { "job": "checks", "step": "Lint", "tool": "generic", "reach": "caught" },
+    { "job": "checks", "step": "Check syntax", "tool": "generic", "reach": "survived" },
+    { "job": "checks", "step": "golangci/golangci-lint-action@v8", "tool": "golangci-lint", "status": "unjudged" }
+  ],
+  "static": [{ "rule": "masked-exit", "step": "Check syntax" }]
+}

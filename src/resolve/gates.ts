@@ -519,16 +519,22 @@ function resolveStep(
   if (run) {
     walkScript(run.text, 'run', 'run', workingDirectory, [], w, 0);
     if (w.invocations.length === 0 && CHECK_NAMED.test(`${step.name ?? ''} ${run.text}`)) {
-      const cmd = allCommands(parseShell(run.text))
-        .map(words)
-        .find((argv) => argv.length > 0 && !UTILITIES.has(argv[0]!));
+      const trace = w.traces[0]!;
+      const cmd = allCommands(trace.script).find((c) => {
+        // `python3 -m compileall` is a check; `python3` alone is only a launcher.
+        const head = stripWrappers(words(c)).argv[0];
+        return head !== undefined && !UTILITIES.has(head);
+      });
       if (cmd) {
+        // The static shell rules look for masking around this command, like any other gate.
+        trace.gateCommands.push(cmd);
+        const argv = words(cmd);
         w.invocations.push({
           tool: 'generic',
-          argv: cmd,
+          argv,
           cwd: workingDirectory,
           pathArgs: [],
-          via: [cmd.join(' ')],
+          via: [argv.join(' ')],
         });
       }
     }

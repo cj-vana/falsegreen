@@ -141,7 +141,8 @@ async function replayGate(
   const tracked = trackedFiles(root);
   for (const inv of gate.invocations) {
     const def = toolDef(inv.tool);
-    for (const tier of opts.tiers) {
+    // A tool without a semantic fault (compile-only checks, the generic fault) skips that tier.
+    for (const tier of opts.tiers.filter((t) => !def?.tiers || def.tiers.includes(t))) {
       if (!def) {
         result.runs.push(faultRun(inv, tier, 'unjudged', `no faults for ${inv.tool} yet`));
         continue;
