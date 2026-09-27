@@ -1,3 +1,30 @@
+import type { Marker } from '../core/marker';
+import type { Tier } from '../core/types';
+
+/** A new file; the path is repo-relative and must not exist yet. */
+export interface PlantedFile {
+  path: string;
+  content: string;
+}
+
+/** Text appended to an existing file that must be unmodified relative to HEAD. */
+export interface Append {
+  path: string;
+  text: string;
+}
+
+export interface Fault {
+  tool: ToolId;
+  tier: Tier;
+  marker: Marker;
+  files: PlantedFile[];
+  appends: Append[];
+  /** One line for reports: what was planted. */
+  description: string;
+  /** Known behavior that lets this fault survive, quoted in the finding when it does. */
+  expectSurvival?: string;
+}
+
 /** Every tool falsegreen knows how to plant faults for. `generic` covers unrecognized checks. */
 export const TOOL_IDS = [
   'vitest',
