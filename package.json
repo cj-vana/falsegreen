@@ -1,0 +1,77 @@
+{
+  "name": "falsegreen",
+  "version": "0.1.0",
+  "description": "Proves your CI gates can fail. Plants known faults, runs each gate the way your workflow does, and reports every check that stays green anyway.",
+  "keywords": [
+    "ci",
+    "continuous-integration",
+    "github-actions",
+    "testing",
+    "mutation-testing",
+    "quality-gates",
+    "devops"
+  ],
+  "homepage": "https://github.com/cj-vana/falsegreen#readme",
+  "bugs": {
+    "url": "https://github.com/cj-vana/falsegreen/issues"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/cj-vana/falsegreen.git"
+  },
+  "license": "MIT",
+  "author": "cj-vana",
+  "type": "module",
+  "bin": {
+    "falsegreen": "./dist/cli.js"
+  },
+  "main": "./dist/index.js",
+  "module": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    },
+    "./package.json": "./package.json"
+  },
+  "files": [
+    "dist",
+    "README.md",
+    "LICENSE"
+  ],
+  "engines": {
+    "node": ">=22.12"
+  },
+  "scripts": {
+    "build": "tsup",
+    "dev": "tsup --watch",
+    "typecheck": "tsc --noEmit",
+    "lint": "eslint .",
+    "lint:fix": "eslint . --fix",
+    "format": "prettier --write .",
+    "format:check": "prettier --check .",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "test:coverage": "vitest run --coverage",
+    "check": "npm run format:check && npm run lint && npm run typecheck && npm test",
+    "prepublishOnly": "npm run build"
+  },
+  "dependencies": {
+    "commander": "^15.0.0",
+    "picocolors": "^1.1.1",
+    "yaml": "^2.9.1",
+    "zod": "^4.6.5"
+  },
+  "devDependencies": {
+    "@eslint/js": "^10.0.1",
+    "@types/node": "^26.6.3",
+    "@vitest/coverage-v8": "^5.0.2",
+    "eslint": "^10.11.0",
+    "prettier": "^3.9.9",
+    "tsup": "^8.5.1",
+    "typescript": "^6.0.3",
+    "typescript-eslint": "^8.70.1",
+    "vitest": "^5.0.2"
+  }
+}

@@ -1,0 +1,42 @@
+# Dependencies
+node_modules/
+
+# Build output
+dist/
+*.tsbuildinfo
+
+# Test / coverage
+coverage/
+
+# Scratch space: temp repos, fixture copies, toolchains for the tests
+tmp/
+
+# falsegreen run output
+falsegreen-report/
+
+# Logs
+*.log
+npm-debug.log*
+
+# Planning documents are never committed (see CONTRIBUTING.md)
+*-plan.md
+*-PLAN.md
+*-HANDOFF.md
+*_SUMMARY.md
+IMPLEMENTATION_SUMMARY.md
+progress.txt
+.planning/
+.codex/
+.forge/
+docs/superpowers/
+
+# Local agent settings and worktrees
+.claude/settings.local.json
+.claude/worktrees/
+.superpowers/
+
+# Editor / OS
+.DS_Store
+.idea/
+.vscode/
+*.swp

@@ -1,0 +1,11 @@
+dist
+coverage
+node_modules
+tmp
+falsegreen-report
+# fixture repositories are formatted the way each case needs, including on purpose badly
+test/fixtures
+# local agent settings, not part of the project
+.claude
+.superpowers
+*.md
