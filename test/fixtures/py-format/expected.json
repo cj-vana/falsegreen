@@ -1,0 +1,10 @@
+{
+  "requires": ["black", "ruff", "isort"],
+  "gates": [
+    { "job": "format", "step": "Run black --check .", "tool": "black", "reach": "caught", "semantic": "caught" },
+    { "job": "format", "step": "Run ruff format --check .", "tool": "ruff-format", "reach": "caught", "semantic": "caught" },
+    { "job": "format", "step": "Run isort --check-only --diff .", "tool": "isort", "reach": "caught", "semantic": "caught" },
+    { "job": "format", "step": "Run isort --check-only . | tail -n 5", "tool": "isort", "reach": "survived", "semantic": "survived" }
+  ],
+  "static": [{ "rule": "pipe-swallows-exit", "step": "Run isort --check-only . | tail -n 5" }]
+}

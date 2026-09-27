@@ -1,0 +1,11 @@
+{
+  "requires": ["mypy", "pyright", "basedpyright"],
+  "gates": [
+    { "job": "types", "step": "Run mypy app", "tool": "mypy", "reach": "caught", "semantic": "caught" },
+    { "job": "types", "step": "Run mypy scripts", "tool": "mypy", "reach": "survived", "semantic": "survived" },
+    { "job": "types", "step": "Run pyright", "tool": "pyright", "reach": "caught", "semantic": "caught" },
+    { "job": "types", "step": "Run basedpyright", "tool": "basedpyright", "reach": "caught", "semantic": "caught" },
+    { "job": "types", "step": "Run pyright", "tool": "pyright", "reach": "caught", "semantic": "survived" }
+  ],
+  "static": []
+}
