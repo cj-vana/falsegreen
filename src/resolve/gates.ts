@@ -1,0 +1,540 @@
+/**
+ * Turns workflow steps into gates: steps that run at least one recognized check tool, found by
+ * following the step's shell text through package scripts, make targets, shell scripts and
+ * pre-commit hooks. Every script level visited is kept as a trace, so static rules can look for a
+ * masked exit wherever it hides (`"test": "jest || true"` counts as much as `run: jest || true`).
+ */
+import { readFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join, posix } from 'node:path';
+
+import type { ResolvedConfig } from '../config/load';
+import { currentBranch, originSlug, trackedFiles } from '../core/git';
+import type { SourceLocation } from '../core/types';
+import type { ToolId, ToolInvocation } from '../faults/types';
+import {
+  allCommands,
+  parseShell,
+  words,
+  type ShellScript,
+  type SimpleCommand,
+} from '../shell/parse';
+import { checkName } from '../workflow/checks';
+import { emptyContext, substitute, type ExprContext } from '../workflow/expressions';
+import { expandMatrix } from '../workflow/matrix';
+import type { JobModel, StepModel, WorkflowModel } from '../workflow/model';
+import { makeCall, makeDryRun } from './make';
+import { PRECOMMIT_CONFIG, precommitTools } from './precommit';
+import { scriptCall, scriptFor } from './scripts';
+import { identify } from './tools';
+import { stripWrappers } from './wrappers';
+
+export interface ScriptTrace {
+  /** `run`, `package.json#test`, `web/package.json#lint`, `Makefile:test`, `scripts/ci.sh`. */
+  source: string;
+  text: string;
+  script: ShellScript;
+  /** Commands in this script that run a check tool, directly or through another script. */
+  gateCommands: SimpleCommand[];
+}
+
+export interface Gate {
+  /** `${workflow}#${jobId}#${stepIndex}#${comboIndex}` */
+  key: string;
+  workflow: string;
+  jobId: string;
+  jobName: string;
+  checkName: string;
+  stepIndex: number;
+  stepName: string;
+  loc: SourceLocation;
+  runLine?: number;
+  kind: 'run' | 'uses';
+  /** The step's shell text with expressions substituted. */
+  run?: string;
+  shell?: string;
+  /** Repo-relative, '' for the repository root. */
+  workingDirectory: string;
+  env: Record<string, string>;
+  combo: Record<string, string>;
+  invocations: ToolInvocation[];
+  traces: ScriptTrace[];
+  /** Expressions in the command that could not be rebuilt; replay is refused while any remain. */
+  unresolved: string[];
+  notes: string[];
+  /** A command that must never be replayed (`npm publish`, `git push`, ...). */
+  unsafe?: string;
+  fromAction?: string;
+  job: JobModel;
+  step: StepModel;
+}
+
+const MAX_DEPTH = 8;
+
+const CHECK_ACTIONS: Record<string, ToolId> = {
+  'golangci/golangci-lint-action': 'golangci-lint',
+  'astral-sh/ruff-action': 'ruff-check',
+  'chartboost/ruff-action': 'ruff-check',
+  'psf/black': 'black',
+  'reviewdog/action-eslint': 'eslint',
+  'reviewdog/action-golangci-lint': 'golangci-lint',
+  'super-linter/super-linter': 'generic',
+  'github/super-linter': 'generic',
+};
+
+const CHECK_NAMED = /\b(tests?|lint|checks?|verify|typecheck|type-check|fmt|format|vet|clippy)\b/i;
+
+/** Commands that are never the check itself; skipped when picking a generic gate command. */
+const UTILITIES = new Set([
+  'echo',
+  'printf',
+  'cd',
+  'pushd',
+  'popd',
+  'export',
+  'set',
+  'unset',
+  'mkdir',
+  'cp',
+  'mv',
+  'rm',
+  'cat',
+  'ls',
+  'true',
+  'false',
+  'test',
+  '[',
+  '[[',
+  'source',
+  '.',
+  'exit',
+  'sleep',
+  'curl',
+  'wget',
+  'tee',
+  'grep',
+  'sed',
+  'awk',
+  'chmod',
+  'touch',
+  'pwd',
+  'which',
+  'env',
+  'git',
+  'npm',
+  'pnpm',
+  'yarn',
+  'bun',
+  'pip',
+  'pip3',
+  'apt-get',
+  'apt',
+  'brew',
+  'sudo',
+  'tar',
+  'unzip',
+  'docker',
+  'eval',
+  'read',
+  'shift',
+  'wait',
+  'trap',
+  'command',
+  'node',
+  'python',
+  'python3',
+  'uv',
+  'poetry',
+  'go',
+  'cargo',
+  'rustup',
+  'corepack',
+  'nvm',
+]);
+
+function unsafeCommand(raw: string[]): string | undefined {
+  const argv = stripWrappers(raw).argv;
+  const [a, b] = argv;
+  if (a === undefined) return undefined;
+  const pair = `${a} ${b ?? ''}`.trim();
+  const publishers = [
+    'npm',
+    'pnpm',
+    'yarn',
+    'bun',
+    'cargo',
+    'poetry',
+    'uv',
+    'twine',
+    'flit',
+    'hatch',
+    'gem',
+    'dotnet',
+  ];
+  if (publishers.includes(a) && (b === 'publish' || b === 'upload' || b === 'push')) return pair;
+  const exact = [
+    'git push',
+    'docker push',
+    'gh release',
+    'kubectl apply',
+    'kubectl delete',
+    'terraform apply',
+    'terraform destroy',
+    'helm install',
+    'helm upgrade',
+    'netlify deploy',
+    'firebase deploy',
+    'wrangler deploy',
+    'wrangler publish',
+    'fly deploy',
+    'flyctl deploy',
+    'vercel deploy',
+  ];
+  if (exact.includes(pair)) return pair;
+  if (a === 'vercel' && argv.includes('--prod')) return 'vercel --prod';
+  if ((a === 'mvn' || a === 'mvnw') && argv.includes('deploy')) return 'mvn deploy';
+  if ((a === 'gradle' || a === 'gradlew') && argv.some((t) => /(^|:)publish/.test(t)))
+    return 'gradle publish';
+  return undefined;
+}
+
+interface Walk {
+  root: string;
+  tracked: Set<string>;
+  invocations: ToolInvocation[];
+  traces: ScriptTrace[];
+  notes: string[];
+  unsafe?: string;
+}
+
+function normalizeDir(cwd: string, target: string): string {
+  const joined = posix.normalize(posix.join(cwd, target)).replace(/\/$/, '');
+  return joined === '.' ? '' : joined;
+}
+
+/** Walks one script level; returns true when any command in it leads to a gate. */
+function walkScript(
+  text: string,
+  source: string,
+  cwd: string,
+  via: string[],
+  w: Walk,
+  depth: number,
+): boolean {
+  const script = parseShell(text);
+  const trace: ScriptTrace = { source, text, script, gateCommands: [] };
+  w.traces.push(trace);
+  let dir = cwd;
+  const stack: string[] = [];
+  for (const cmd of allCommands(script)) {
+    const argv = words(cmd);
+    if (argv.length === 0) continue;
+    const [head, target] = argv;
+    if (head === 'cd' || head === 'pushd') {
+      const dynamic = cmd.argv[1]?.dynamic ?? true;
+      if (
+        target !== undefined &&
+        !dynamic &&
+        target !== '-' &&
+        !target.startsWith('~') &&
+        !target.startsWith('/')
+      ) {
+        if (head === 'pushd') stack.push(dir);
+        dir = normalizeDir(dir, target);
+      }
+      continue;
+    }
+    if (head === 'popd') {
+      dir = stack.pop() ?? dir;
+      continue;
+    }
+    w.unsafe ??= unsafeCommand(argv);
+    if (resolveCommand(argv, dir, via, w, depth)) trace.gateCommands.push(cmd);
+  }
+  return trace.gateCommands.length > 0;
+}
+
+function resolveCommand(
+  argv: string[],
+  dir: string,
+  via: string[],
+  w: Walk,
+  depth: number,
+): boolean {
+  if (depth > MAX_DEPTH) return false;
+  const label = argv.join(' ');
+  const direct = identify(argv, dir, w.root);
+  if (direct.length > 0) {
+    for (const inv of direct) w.invocations.push({ ...inv, via: [...via, label] });
+    return true;
+  }
+
+  const call = scriptCall(argv, dir);
+  if (call) {
+    const found = scriptFor(w.root, call.dir, call.name);
+    if (!found) {
+      if (call.ifPresent)
+        w.notes.push(`${label}: no ${call.name} script, and --if-present makes that a pass`);
+      return call.fallback ? resolveCommand(call.fallback, dir, via, w, depth + 1) : false;
+    }
+    if (call.ifPresent) w.notes.push(`${label} uses --if-present`);
+    const pkg = found.packageDir === '' ? 'package.json' : `${found.packageDir}/package.json`;
+    let any = false;
+    const names =
+      call.runner === 'npm' ? [`pre${call.name}`, call.name, `post${call.name}`] : [call.name];
+    for (const name of names) {
+      const script = name === call.name ? found : scriptFor(w.root, call.dir, name);
+      if (!script) continue;
+      any =
+        walkScript(
+          script.text,
+          `${pkg}#${name}`,
+          found.packageDir,
+          [...via, label],
+          w,
+          depth + 1,
+        ) || any;
+    }
+    return any;
+  }
+
+  const make = makeCall(argv, dir);
+  if (make) {
+    const dry = makeDryRun(w.root, make);
+    if ('error' in dry) {
+      w.notes.push(`make -n ${make.args.join(' ')} failed: ${dry.error}`);
+      return false;
+    }
+    return walkScript(dry.output, make.label, make.dir, [...via, label], w, depth + 1);
+  }
+
+  const [head, first] = argv;
+  const scriptPath =
+    head === 'bash' || head === 'sh' || head === 'zsh'
+      ? first
+      : head?.startsWith('./')
+        ? head
+        : undefined;
+  if (scriptPath !== undefined) {
+    const file = normalizeDir(dir, scriptPath);
+    if (w.tracked.has(file)) {
+      return walkScript(
+        readFileSync(join(w.root, file), 'utf8'),
+        file,
+        dir,
+        [...via, label],
+        w,
+        depth + 1,
+      );
+    }
+  }
+
+  if (head === 'pre-commit' && first === 'run') {
+    const hook = argv.slice(2).find((a) => !a.startsWith('-'));
+    const tools = precommitTools(w.root, hook);
+    if (!argv.includes('--all-files') && !argv.includes('-a')) {
+      w.notes.push(`${label} checks staged files only; planted files are staged for the run`);
+    }
+    for (const tool of tools) {
+      w.invocations.push({
+        tool,
+        argv,
+        cwd: '',
+        pathArgs: [],
+        via: [...via, label, `${PRECOMMIT_CONFIG} hook`],
+      });
+    }
+    return tools.length > 0;
+  }
+  return false;
+}
+
+function firstLine(text: string): string {
+  return text.trim().split('\n')[0]!.trim();
+}
+
+function displayName(step: StepModel, run: string | undefined, ctx: ExprContext): string {
+  if (step.name !== undefined) return substitute(step.name, ctx).text;
+  if (run !== undefined) return `Run ${firstLine(run)}`;
+  return step.uses ?? `step ${step.index + 1}`;
+}
+
+/** Substitutes env maps level by level, dropping values that cannot be rebuilt. */
+function buildEnv(
+  levels: Record<string, string>[],
+  base: ExprContext,
+  notes: string[],
+): Record<string, string> {
+  const env: Record<string, string> = {};
+  for (const level of levels) {
+    for (const [k, v] of Object.entries(level)) {
+      const s = substitute(v, { ...base, env });
+      if (s.unresolved.length > 0) {
+        delete env[k];
+        notes.push(`env ${k} left unset: ${s.unresolved.join(', ')} cannot be rebuilt locally`);
+      } else {
+        env[k] = s.text;
+      }
+    }
+  }
+  return env;
+}
+
+function inputsOf(wf: WorkflowModel): Record<string, string> {
+  const out: Record<string, string> = {};
+  for (const source of [wf.triggers.workflowCall, wf.triggers.workflowDispatch]) {
+    for (const [name, spec] of Object.entries(source?.inputs ?? {})) {
+      if (spec.default !== undefined) out[name] = spec.default;
+    }
+  }
+  return out;
+}
+
+export function resolveGates(
+  root: string,
+  workflows: WorkflowModel[],
+  cfg: ResolvedConfig,
+  opts: { matrix: 'first' | 'all' },
+): Gate[] {
+  const tracked = new Set(trackedFiles(root));
+  const github: Record<string, string> = { workspace: root };
+  const slug = originSlug(root);
+  if (slug) github.repository = slug;
+  const branch = currentBranch(root);
+  if (branch) github.ref_name = branch;
+  const runner = {
+    os:
+      process.platform === 'darwin' ? 'macOS' : process.platform === 'win32' ? 'Windows' : 'Linux',
+    temp: tmpdir(),
+  };
+
+  const gates: Gate[] = [];
+  for (const wf of workflows) {
+    const inputs = inputsOf(wf);
+    for (const job of wf.jobs) {
+      if (job.usesWorkflow !== undefined) continue;
+      const combos = expandMatrix(job.matrix);
+      const chosen = opts.matrix === 'first' ? combos.slice(0, 1) : combos.slice(0, cfg.matrix.max);
+      chosen.forEach((combo, comboIndex) => {
+        for (const step of job.steps) {
+          const gate = resolveStep(
+            root,
+            tracked,
+            wf,
+            job,
+            step,
+            combo,
+            comboIndex,
+            { github, runner, inputs },
+            cfg,
+          );
+          if (gate) gates.push(gate);
+        }
+      });
+    }
+  }
+  return gates;
+}
+
+function resolveStep(
+  root: string,
+  tracked: Set<string>,
+  wf: WorkflowModel,
+  job: JobModel,
+  step: StepModel,
+  combo: Record<string, string>,
+  comboIndex: number,
+  base: {
+    github: Record<string, string>;
+    runner: Record<string, string>;
+    inputs: Record<string, string>;
+  },
+  cfg: ResolvedConfig,
+): Gate | undefined {
+  const notes: string[] = [];
+  const ctx: ExprContext = { ...emptyContext(), ...base, matrix: combo };
+  const env = buildEnv([wf.env, job.env, step.env], ctx, notes);
+  const full: ExprContext = { ...ctx, env };
+
+  const wdRaw =
+    step.workingDirectory ?? job.defaults.workingDirectory ?? wf.defaults.workingDirectory ?? '';
+  let wd = substitute(wdRaw, full).text;
+  if (wd.startsWith(root)) wd = wd.slice(root.length).replace(/^\//, '');
+  const workingDirectory = normalizeDir('', wd || '.');
+  const shellRaw = step.shell ?? job.defaults.shell ?? wf.defaults.shell;
+  const shell = shellRaw === undefined ? undefined : substitute(shellRaw, full).text;
+
+  const run = step.run === undefined ? undefined : substitute(step.run, full);
+  const stepName = displayName(step, run?.text, full);
+  const w: Walk = { root, tracked, invocations: [], traces: [], notes };
+  let kind: Gate['kind'] = 'run';
+
+  if (run) {
+    walkScript(run.text, 'run', workingDirectory, [], w, 0);
+    if (w.invocations.length === 0 && CHECK_NAMED.test(`${step.name ?? ''} ${run.text}`)) {
+      const cmd = allCommands(parseShell(run.text))
+        .map(words)
+        .find((argv) => argv.length > 0 && !UTILITIES.has(argv[0]!));
+      if (cmd) {
+        w.invocations.push({
+          tool: 'generic',
+          argv: cmd,
+          cwd: workingDirectory,
+          pathArgs: [],
+          via: [cmd.join(' ')],
+        });
+      }
+    }
+  } else if (step.uses !== undefined) {
+    const action = step.uses.split('@')[0]!.split('/').slice(0, 2).join('/');
+    const tool = CHECK_ACTIONS[action];
+    if (tool) {
+      kind = 'uses';
+      w.invocations.push({
+        tool,
+        argv: [step.uses],
+        cwd: workingDirectory,
+        pathArgs: [],
+        via: [step.uses],
+      });
+    }
+  }
+
+  for (const extra of cfg.gates.filter((g) => g.job === job.id && g.step === stepName)) {
+    w.invocations.push({
+      tool: extra.tool,
+      argv: run ? [firstLine(run.text)] : [],
+      cwd: extra.cwd ?? workingDirectory,
+      pathArgs: [],
+      via: [cfg.source ?? 'falsegreen.config.yml'],
+    });
+  }
+  if (w.invocations.length === 0) return undefined;
+
+  const gate: Gate = {
+    key: `${wf.file}#${job.id}#${step.index}#${comboIndex}`,
+    workflow: wf.file,
+    jobId: job.id,
+    jobName: job.name === undefined ? job.id : substitute(job.name, full).text,
+    checkName: checkName(job, combo),
+    stepIndex: step.index,
+    stepName,
+    loc: step.loc,
+    kind,
+    workingDirectory,
+    env,
+    combo,
+    invocations: w.invocations,
+    traces: w.traces,
+    unresolved: run?.unresolved ?? [],
+    notes: w.notes,
+    job,
+    step,
+  };
+  if (step.runLine !== undefined) gate.runLine = step.runLine;
+  if (run) gate.run = run.text;
+  if (shell !== undefined) gate.shell = shell;
+  if (w.unsafe !== undefined) gate.unsafe = w.unsafe;
+  if (step.fromAction !== undefined) gate.fromAction = step.fromAction;
+  return gate;
+}
