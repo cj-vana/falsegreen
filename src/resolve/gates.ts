@@ -32,6 +32,12 @@ import { stripWrappers } from './wrappers';
 export interface ScriptTrace {
   /** `run`, `package.json#test`, `web/package.json#lint`, `Makefile:test`, `scripts/ci.sh`. */
   source: string;
+  /**
+   * How the text is executed, which decides whether a failure stops it: `run` under the step's
+   * shell, `package-script` under `sh -c` (no -e), `make` one shell per line with make checking
+   * each, `file` a script run by bash or sh (no -e unless it sets it).
+   */
+  kind: 'run' | 'package-script' | 'make' | 'file';
   text: string;
   script: ShellScript;
   /** Commands in this script that run a check tool, directly or through another script. */
@@ -62,9 +68,29 @@ export interface Gate {
   /** Expressions in the command that could not be rebuilt; replay is refused while any remain. */
   unresolved: string[];
   notes: string[];
+  ifPresent: IfPresentUse[];
   /** A command that must never be replayed (`npm publish`, `git push`, ...). */
   unsafe?: string;
   fromAction?: string;
+  job: JobModel;
+  step: StepModel;
+}
+
+/** A `run --if-present` call; `missing` when no such script exists, so the call does nothing. */
+export interface IfPresentUse {
+  trace: ScriptTrace;
+  cmd: SimpleCommand;
+  missing: boolean;
+}
+
+/** A step that looks like a check but runs none (today: every script it names is missing). */
+export interface EmptyStep {
+  workflow: string;
+  jobId: string;
+  stepName: string;
+  loc: SourceLocation;
+  runLine?: number;
+  ifPresent: IfPresentUse[];
   job: JobModel;
   step: StepModel;
 }
@@ -204,6 +230,7 @@ interface Walk {
   invocations: ToolInvocation[];
   traces: ScriptTrace[];
   notes: string[];
+  ifPresent: IfPresentUse[];
   unsafe?: string;
 }
 
@@ -216,13 +243,14 @@ function normalizeDir(cwd: string, target: string): string {
 function walkScript(
   text: string,
   source: string,
+  kind: ScriptTrace['kind'],
   cwd: string,
   via: string[],
   w: Walk,
   depth: number,
 ): boolean {
   const script = parseShell(text);
-  const trace: ScriptTrace = { source, text, script, gateCommands: [] };
+  const trace: ScriptTrace = { source, kind, text, script, gateCommands: [] };
   w.traces.push(trace);
   let dir = cwd;
   const stack: string[] = [];
@@ -249,6 +277,10 @@ function walkScript(
       continue;
     }
     w.unsafe ??= unsafeCommand(argv);
+    const call = scriptCall(argv, dir);
+    if (call?.ifPresent) {
+      w.ifPresent.push({ trace, cmd, missing: !scriptFor(w.root, call.dir, call.name) });
+    }
     if (resolveCommand(argv, dir, via, w, depth)) trace.gateCommands.push(cmd);
   }
   return trace.gateCommands.length > 0;
@@ -289,6 +321,7 @@ function resolveCommand(
         walkScript(
           script.text,
           `${pkg}#${name}`,
+          'package-script',
           found.packageDir,
           [...via, label],
           w,
@@ -305,7 +338,7 @@ function resolveCommand(
       w.notes.push(`make -n ${make.args.join(' ')} failed: ${dry.error}`);
       return false;
     }
-    return walkScript(dry.output, make.label, make.dir, [...via, label], w, depth + 1);
+    return walkScript(dry.output, make.label, 'make', make.dir, [...via, label], w, depth + 1);
   }
 
   const [head, first] = argv;
@@ -321,6 +354,7 @@ function resolveCommand(
       return walkScript(
         readFileSync(join(w.root, file), 'utf8'),
         file,
+        'file',
         dir,
         [...via, label],
         w,
@@ -396,6 +430,16 @@ export function resolveGates(
   cfg: ResolvedConfig,
   opts: { matrix: 'first' | 'all' },
 ): Gate[] {
+  return resolveAll(root, workflows, cfg, opts).gates;
+}
+
+/** Gates, plus steps that look like checks but run nothing. */
+export function resolveAll(
+  root: string,
+  workflows: WorkflowModel[],
+  cfg: ResolvedConfig,
+  opts: { matrix: 'first' | 'all' },
+): { gates: Gate[]; emptySteps: EmptyStep[] } {
   const tracked = new Set(trackedFiles(root));
   const github: Record<string, string> = { workspace: root };
   const slug = originSlug(root);
@@ -409,6 +453,7 @@ export function resolveGates(
   };
 
   const gates: Gate[] = [];
+  const emptySteps: EmptyStep[] = [];
   for (const wf of workflows) {
     const inputs = inputsOf(wf);
     for (const job of wf.jobs) {
@@ -417,7 +462,7 @@ export function resolveGates(
       const chosen = opts.matrix === 'first' ? combos.slice(0, 1) : combos.slice(0, cfg.matrix.max);
       chosen.forEach((combo, comboIndex) => {
         for (const step of job.steps) {
-          const gate = resolveStep(
+          const resolved = resolveStep(
             root,
             tracked,
             wf,
@@ -428,12 +473,14 @@ export function resolveGates(
             { github, runner, inputs },
             cfg,
           );
-          if (gate) gates.push(gate);
+          if (resolved && 'key' in resolved) gates.push(resolved);
+          // Matrix combinations repeat the same empty step; report it once.
+          else if (resolved && comboIndex === 0) emptySteps.push(resolved);
         }
       });
     }
   }
-  return gates;
+  return { gates, emptySteps };
 }
 
 function resolveStep(
@@ -450,7 +497,7 @@ function resolveStep(
     inputs: Record<string, string>;
   },
   cfg: ResolvedConfig,
-): Gate | undefined {
+): Gate | EmptyStep | undefined {
   const notes: string[] = [];
   const ctx: ExprContext = { ...emptyContext(), ...base, matrix: combo };
   const env = buildEnv([wf.env, job.env, step.env], ctx, notes);
@@ -466,11 +513,11 @@ function resolveStep(
 
   const run = step.run === undefined ? undefined : substitute(step.run, full);
   const stepName = displayName(step, run?.text, full);
-  const w: Walk = { root, tracked, invocations: [], traces: [], notes };
+  const w: Walk = { root, tracked, invocations: [], traces: [], notes, ifPresent: [] };
   let kind: Gate['kind'] = 'run';
 
   if (run) {
-    walkScript(run.text, 'run', workingDirectory, [], w, 0);
+    walkScript(run.text, 'run', 'run', workingDirectory, [], w, 0);
     if (w.invocations.length === 0 && CHECK_NAMED.test(`${step.name ?? ''} ${run.text}`)) {
       const cmd = allCommands(parseShell(run.text))
         .map(words)
@@ -509,7 +556,20 @@ function resolveStep(
       via: [cfg.source ?? 'falsegreen.config.yml'],
     });
   }
-  if (w.invocations.length === 0) return undefined;
+  if (w.invocations.length === 0) {
+    if (!w.ifPresent.some((u) => u.missing)) return undefined;
+    const empty: EmptyStep = {
+      workflow: wf.file,
+      jobId: job.id,
+      stepName,
+      loc: step.loc,
+      ifPresent: w.ifPresent,
+      job,
+      step,
+    };
+    if (step.runLine !== undefined) empty.runLine = step.runLine;
+    return empty;
+  }
 
   const gate: Gate = {
     key: `${wf.file}#${job.id}#${step.index}#${comboIndex}`,
@@ -528,6 +588,7 @@ function resolveStep(
     traces: w.traces,
     unresolved: run?.unresolved ?? [],
     notes: w.notes,
+    ifPresent: w.ifPresent,
     job,
     step,
   };
