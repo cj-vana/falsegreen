@@ -1,0 +1,13 @@
+{
+  "requires": ["ruff", "flake8", "pylint", "pre-commit"],
+  "gates": [
+    { "job": "lint", "step": "Run ruff check .", "tool": "ruff-check", "reach": "caught", "semantic": "caught" },
+    { "job": "lint", "step": "Run flake8 --exit-zero app", "tool": "flake8", "reach": "survived", "semantic": "survived" },
+    { "job": "lint", "step": "Run pylint app", "tool": "pylint", "reach": "caught", "semantic": "caught" },
+    { "job": "lint", "step": "Run pre-commit run", "tool": "ruff-check", "reach": "survived", "semantic": "survived" },
+    { "job": "lint", "step": "Run pre-commit run", "tool": "flake8", "reach": "survived", "semantic": "survived" },
+    { "job": "lint", "step": "Run pre-commit run --all-files", "tool": "ruff-check", "reach": "caught", "semantic": "caught" },
+    { "job": "lint", "step": "Run pre-commit run --all-files", "tool": "flake8", "reach": "caught", "semantic": "caught" }
+  ],
+  "static": []
+}

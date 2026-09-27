@@ -358,15 +358,15 @@ function python(argv: string[], ctx: Ctx): ToolInvocation[] | undefined {
     case 'pytest':
     case 'py.test':
       return simple('pytest', argv, { ...ctx, exe: 'pytest' });
-    case 'unittest':
+    case 'unittest': {
+      // `discover tests` names the start directory positionally, like `discover -s tests`.
+      const start =
+        flagValue(argv, ['-s', '--start-directory']) ??
+        (sub === 'discover' ? positionals(argv, 'unittest', 2)[0] : undefined);
       return [
-        invocation(
-          'unittest',
-          argv,
-          ctx,
-          existingPaths([flagValue(argv, ['-s', '--start-directory']) ?? ''].filter(Boolean), ctx),
-        ),
+        invocation('unittest', argv, ctx, existingPaths(start === undefined ? [] : [start], ctx)),
       ];
+    }
     case 'ruff': {
       if (sub === 'format') {
         return has(argv, '--check', '--diff') ? simple('ruff-format', argv, ctx, 2) : [];

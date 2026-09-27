@@ -121,6 +121,13 @@ describe('identify: Python', () => {
     expect(one('pytest -q tests')!.pathArgs).toEqual(['tests']);
     expect(one('pytest -k slow tests')!.pathArgs).toEqual(['tests']);
   });
+
+  it('reads the unittest start directory from -s or the first positional after discover', () => {
+    expect(one('python -m unittest discover -s tests')!.pathArgs).toEqual(['tests']);
+    expect(one('python -m unittest discover tests test*.py')!.pathArgs).toEqual(['tests']);
+    expect(one('python -m unittest discover -p *_test.py tests')!.pathArgs).toEqual(['tests']);
+    expect(one('python -m unittest tests.test_a')!.pathArgs).toEqual([]);
+  });
 });
 
 describe('identify: Go', () => {

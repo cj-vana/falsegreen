@@ -1,0 +1,13 @@
+name: CI
+on: push
+jobs:
+  types:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - run: mypy app
+      - run: mypy scripts
+      - run: pyright
+      - run: basedpyright
+      - run: pyright
+        working-directory: legacy

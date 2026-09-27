@@ -1,0 +1,11 @@
+{
+  "requires": ["python", "pytest"],
+  "gates": [
+    { "job": "test", "step": "Run pytest -q", "tool": "pytest", "reach": "caught", "semantic": "caught" },
+    { "job": "test", "step": "Run python -m pytest -q || true", "tool": "pytest", "reach": "survived", "semantic": "survived" },
+    { "job": "test", "step": "Run python -m unittest discover -s tests -v", "tool": "unittest", "reach": "caught", "semantic": "caught" },
+    { "job": "test", "step": "Run python -m unittest discover -s legacy -p '*_spec.py'", "tool": "unittest", "reach": "caught", "semantic": "caught" },
+    { "job": "test", "step": "Run python -m unittest tests.test_calc", "tool": "unittest", "reach": "survived", "semantic": "survived" }
+  ],
+  "static": [{ "rule": "masked-exit", "step": "Run python -m pytest -q || true" }]
+}

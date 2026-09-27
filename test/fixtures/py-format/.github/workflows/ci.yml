@@ -1,0 +1,15 @@
+name: CI
+on: push
+# black keeps its cache under the user cache directory; this keeps it out of the home directory
+# when the fixture runs on a developer machine.
+env:
+  XDG_CACHE_HOME: ${{ runner.temp }}/xdg-cache
+jobs:
+  format:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - run: black --check .
+      - run: ruff format --check .
+      - run: isort --check-only --diff .
+      - run: isort --check-only . | tail -n 5

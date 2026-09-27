@@ -1,0 +1,3 @@
+place:
+  - tool: mypy
+    dir: app

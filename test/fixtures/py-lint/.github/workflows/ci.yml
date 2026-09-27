@@ -1,0 +1,16 @@
+name: CI
+on: push
+# pylint keeps its stats under the user cache directory; this keeps them out of the home
+# directory when the fixture runs on a developer machine.
+env:
+  XDG_CACHE_HOME: ${{ runner.temp }}/xdg-cache
+jobs:
+  lint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - run: ruff check .
+      - run: flake8 --exit-zero app
+      - run: pylint app
+      - run: pre-commit run
+      - run: pre-commit run --all-files
