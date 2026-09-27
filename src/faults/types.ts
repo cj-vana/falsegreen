@@ -1,0 +1,51 @@
+/** Every tool falsegreen knows how to plant faults for. `generic` covers unrecognized checks. */
+export const TOOL_IDS = [
+  'vitest',
+  'jest',
+  'mocha',
+  'node-test',
+  'bun-test',
+  'tsc',
+  'vue-tsc',
+  'eslint',
+  'biome-lint',
+  'biome-format',
+  'oxlint',
+  'prettier',
+  'pytest',
+  'unittest',
+  'ruff-check',
+  'flake8',
+  'pylint',
+  'mypy',
+  'pyright',
+  'basedpyright',
+  'black',
+  'ruff-format',
+  'isort',
+  'go-test',
+  'go-vet',
+  'golangci-lint',
+  'staticcheck',
+  'gofmt',
+  'goimports',
+  'gofumpt',
+  'cargo-test',
+  'cargo-nextest',
+  'cargo-clippy',
+  'cargo-fmt',
+  'cargo-check',
+  'gradle-test',
+  'gradle-lint',
+  'gradle-compile',
+  'maven-test',
+  'maven-lint',
+  'maven-compile',
+  'generic',
+] as const;
+
+export type ToolId = (typeof TOOL_IDS)[number];
+
+export type Language = 'js' | 'python' | 'go' | 'rust' | 'jvm' | 'any';
+
+export type Category = 'test' | 'types' | 'lint' | 'format' | 'compile';

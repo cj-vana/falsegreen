@@ -27,25 +27,28 @@ export interface SourceLocation {
   line: number;
 }
 
-export type RuleId =
-  | 'continue-on-error'
-  | 'masked-exit'
-  | 'pipe-swallows-exit'
-  | 'passes-with-no-tests'
-  | 'if-present'
-  | 'path-filtered'
-  | 'conditional-gate'
-  | 'not-required'
-  | 'no-required-checks'
-  | 'required-check-missing'
-  | 'required-checks-unreadable'
-  | 'dead-gate'
-  | 'weak-gate'
-  | 'unattributed'
-  | 'already-red'
-  | 'unjudged'
-  | 'skipped-job'
-  | 'required-gate-passed';
+export const RULE_IDS = [
+  'continue-on-error',
+  'masked-exit',
+  'pipe-swallows-exit',
+  'passes-with-no-tests',
+  'if-present',
+  'path-filtered',
+  'conditional-gate',
+  'not-required',
+  'no-required-checks',
+  'required-check-missing',
+  'required-checks-unreadable',
+  'dead-gate',
+  'weak-gate',
+  'unattributed',
+  'already-red',
+  'unjudged',
+  'skipped-job',
+  'required-gate-passed',
+] as const;
+
+export type RuleId = (typeof RULE_IDS)[number];
 
 export interface Finding {
   rule: RuleId;
