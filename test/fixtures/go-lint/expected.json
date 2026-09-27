@@ -1,0 +1,10 @@
+{
+  "requires": ["go", "staticcheck", "golangci-lint"],
+  "gates": [
+    { "job": "lint", "step": "Run staticcheck ./...", "tool": "staticcheck", "reach": "caught", "semantic": "caught" },
+    { "job": "lint", "step": "Run staticcheck ./... | tee staticcheck.log", "tool": "staticcheck", "reach": "survived", "semantic": "survived" },
+    { "job": "lint", "step": "Run golangci-lint run", "tool": "golangci-lint", "reach": "caught", "semantic": "caught" },
+    { "job": "lint", "step": "Run golangci-lint run --issues-exit-code=0", "tool": "golangci-lint", "reach": "survived", "semantic": "survived" }
+  ],
+  "static": [{ "rule": "pipe-swallows-exit", "step": "Run staticcheck ./... | tee staticcheck.log" }]
+}
