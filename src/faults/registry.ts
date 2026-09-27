@@ -1,7 +1,11 @@
-import { vitest } from './js';
+import { GO_TOOLS } from './go';
+import { JS_TOOLS } from './js';
+import { JVM_TOOLS } from './jvm';
+import { PYTHON_TOOLS } from './python';
+import { RUST_TOOLS } from './rust';
 import type { ToolDef, ToolId } from './types';
 
-const DEFS: ToolDef[] = [vitest];
+const DEFS: ToolDef[] = [...JS_TOOLS, ...PYTHON_TOOLS, ...GO_TOOLS, ...RUST_TOOLS, ...JVM_TOOLS];
 
 const BY_ID = new Map<ToolId, ToolDef>(DEFS.map((d) => [d.id, d]));
 

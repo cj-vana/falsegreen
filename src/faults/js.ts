@@ -65,3 +65,5 @@ export const vitest: ToolDef = {
   category: 'test',
   faults: (ctx, tier) => testFault(vitestRunner, ctx, tier),
 };
+
+export const JS_TOOLS: ToolDef[] = [vitest];

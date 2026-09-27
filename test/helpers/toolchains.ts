@@ -4,15 +4,21 @@
  * quietly running less.
  */
 import { spawnSync } from 'node:child_process';
-import { existsSync } from 'node:fs';
+import { existsSync, readdirSync } from 'node:fs';
 import { delimiter, join } from 'node:path';
 
 const repoRoot = join(import.meta.dirname, '..', '..');
+const tools = join(repoRoot, 'tmp', 'tools');
 
-/** Toolchains installed by scripts/toolchains.sh live under tmp/ and go first on PATH. */
-const EXTRA_PATH = [join(repoRoot, 'tmp', 'py', 'bin'), join(repoRoot, 'tmp', 'bin')].filter(
-  existsSync,
-);
+/**
+ * Toolchains installed by scripts/toolchains.sh live under tmp/ and go first on PATH: a Python
+ * venv at tmp/py, single binaries in tmp/bin, and unpacked distributions in tmp/tools/<name>/bin.
+ */
+const EXTRA_PATH = [
+  join(repoRoot, 'tmp', 'py', 'bin'),
+  join(repoRoot, 'tmp', 'bin'),
+  ...(existsSync(tools) ? readdirSync(tools).map((d) => join(tools, d, 'bin')) : []),
+].filter(existsSync);
 if (EXTRA_PATH.length > 0) {
   process.env.PATH = [...EXTRA_PATH, process.env.PATH ?? ''].join(delimiter);
 }
@@ -21,7 +27,11 @@ if (EXTRA_PATH.length > 0) {
 const PROBES: Record<string, string[]> = {
   make: ['make', '--version'],
   go: ['go', 'version'],
+  staticcheck: ['staticcheck', '-version'],
   cargo: ['cargo', '--version'],
+  'cargo-clippy': ['cargo', 'clippy', '--version'],
+  'cargo-fmt': ['cargo', 'fmt', '--version'],
+  'cargo-nextest': ['cargo', 'nextest', '--version'],
   bun: ['bun', '--version'],
   java: ['java', '-version'],
   gradle: ['gradle', '--version'],
