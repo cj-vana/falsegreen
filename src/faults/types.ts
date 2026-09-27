@@ -49,3 +49,18 @@ export type ToolId = (typeof TOOL_IDS)[number];
 export type Language = 'js' | 'python' | 'go' | 'rust' | 'jvm' | 'any';
 
 export type Category = 'test' | 'types' | 'lint' | 'format' | 'compile';
+
+/** One recognized tool inside a step's command. */
+export interface ToolInvocation {
+  tool: ToolId;
+  /** The tool's argv after wrappers (npx, uv run, python -m, ...) are stripped. */
+  argv: string[];
+  /** Repo-relative directory the tool runs in ('' is the repository root). */
+  cwd: string;
+  /** Existing paths the tool was pointed at, repo-relative. */
+  pathArgs: string[];
+  /** tsc and vue-tsc: the `-p`/`--project` file, repo-relative. */
+  project?: string;
+  /** How the step reached this tool, outermost first (`npm run check`, `tsc --noEmit`). */
+  via: string[];
+}
