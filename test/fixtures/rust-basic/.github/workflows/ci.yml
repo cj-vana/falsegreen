@@ -1,0 +1,18 @@
+name: CI
+on: push
+jobs:
+  rust:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - run: cargo test
+      - run: cargo test --lib
+      - run: cargo nextest run
+      - run: cargo clippy
+      - run: cargo clippy -- -D warnings
+      - name: Clippy with RUSTFLAGS
+        run: cargo clippy
+        env:
+          RUSTFLAGS: -Dwarnings
+      - run: cargo fmt --check
+      - run: cargo check

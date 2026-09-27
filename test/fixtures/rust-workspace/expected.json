@@ -1,0 +1,13 @@
+{
+  "requires": ["cargo", "cargo-clippy", "cargo-fmt", "cargo-nextest", "cc"],
+  "gates": [
+    { "job": "rust", "step": "Run cargo test -p fg-hello", "tool": "cargo-test", "reach": "caught", "semantic": "caught" },
+    { "job": "rust", "step": "Run cargo test --workspace --exclude fg-greet", "tool": "cargo-test", "reach": "caught", "semantic": "caught" },
+    { "job": "rust", "step": "Run cargo nextest run --workspace", "tool": "cargo-nextest", "reach": "caught", "semantic": "caught" },
+    { "job": "rust", "step": "Run cargo clippy --workspace -- -D warnings", "tool": "cargo-clippy", "reach": "caught", "semantic": "caught" },
+    { "job": "rust", "step": "Run cargo fmt --all -- --check", "tool": "cargo-fmt", "reach": "caught", "semantic": "caught" },
+    { "job": "rust", "step": "Run cargo fmt --check", "tool": "cargo-fmt", "reach": "caught", "semantic": "caught" },
+    { "job": "rust", "step": "Check the binary", "tool": "cargo-check", "reach": "caught", "semantic": "unjudged" }
+  ],
+  "static": []
+}
