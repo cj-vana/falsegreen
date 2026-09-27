@@ -1,0 +1,9 @@
+{
+  "requires": ["go"],
+  "gates": [
+    { "job": "test", "step": "Run go test -coverprofile=coverage.out ./...", "tool": "go-test", "reach": "caught", "semantic": "caught" },
+    { "job": "test", "step": "Run go test -run TestAdd ./...", "tool": "go-test", "reach": "caught", "semantic": "survived" },
+    { "job": "test", "step": "Run go vet ./...", "tool": "go-vet", "reach": "caught", "semantic": "caught" }
+  ],
+  "static": []
+}

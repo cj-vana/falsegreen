@@ -1,0 +1,14 @@
+name: CI
+on: push
+jobs:
+  lint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-go@v6
+        with:
+          go-version: stable
+      - run: staticcheck ./...
+      - run: staticcheck ./... | tee staticcheck.log
+      - run: golangci-lint run
+      - run: golangci-lint run --issues-exit-code=0

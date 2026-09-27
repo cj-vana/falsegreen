@@ -1,0 +1,14 @@
+name: CI
+on: push
+jobs:
+  format:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-go@v6
+        with:
+          go-version: stable
+      - run: gofmt -l .
+      - run: test -z "$(gofmt -l .)"
+      - run: gofmt -d .
+      - run: gofumpt -d .

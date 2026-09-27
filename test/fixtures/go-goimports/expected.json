@@ -1,0 +1,9 @@
+{
+  "requires": ["go", "goimports"],
+  "gates": [
+    { "job": "imports", "step": "Run goimports -l .", "tool": "goimports", "reach": "caught", "semantic": "survived" },
+    { "job": "imports", "step": "Run goimports -d .", "tool": "goimports", "reach": "caught", "semantic": "survived" },
+    { "job": "imports", "step": "goimports clean", "tool": "goimports", "reach": "caught", "semantic": "caught" }
+  ],
+  "static": []
+}
