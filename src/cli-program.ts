@@ -12,6 +12,6 @@ export function buildProgram(): Command {
     .version(version);
 }
 
-export async function runCli(argv: string[] = process.argv): Promise<void> {
+export async function runCli(argv: string[]): Promise<void> {
   await buildProgram().parseAsync(argv);
 }
