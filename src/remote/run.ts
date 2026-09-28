@@ -15,6 +15,7 @@ import { TIERS, type Finding, type Tier, type Verdict } from '../core/types';
 import { toolDef } from '../faults/registry';
 import type { Fault } from '../faults/types';
 import { faultContext } from '../local/replay';
+import { unsafeSteps } from '../resolve/gates';
 import { ACTIONS_APP_ID, type RequiredChecks } from '../static/required';
 import { checkName } from '../workflow/checks';
 import { expandMatrix } from '../workflow/matrix';
@@ -133,12 +134,14 @@ export async function runRemote(
     pr: opts.pr,
     branches,
     changedPaths: changed,
+    unsafeRuns: unsafeSteps(loaded.root, loaded.workflows),
   });
   const plan: RemotePlan = { repo, baseSha, tokenKind: opts.tokenKind, branches, ...planned };
   const result: RemoteResult = { plan, ran: false, jobs: [], notes };
   if (plan.refused || !opts.yes) return result;
 
-  const active = plan.entries.filter((e) => e.start !== 'skip');
+  // Workflows without gates start anyway; they are listed and cleaned up, but not waited for.
+  const active = plan.entries.filter((e) => e.start !== 'skip' && e.judged !== false);
   if (active.length === 0) {
     notes.push('no workflow can be started; nothing was run');
     return result;
@@ -157,7 +160,7 @@ export async function runRemote(
 
   const created: string[] = [];
   const started = new Map<string, Run>();
-  const pulls: number[] = [];
+  const pulls = new Map<Tier, number>();
   const shas = new Map<Tier, string>();
   result.ran = true;
   let failure: unknown;
@@ -197,7 +200,8 @@ export async function runRemote(
               html_url: '',
             });
           }
-        } else if (entry.start === 'pr') {
+        } else if (entry.start === 'pr' && !pulls.has(tier)) {
+          // One pull request per branch starts every pull_request workflow at once.
           const { data } = await gh.request<{ number: number }>('POST', `/repos/${repo}/pulls`, {
             title: `falsegreen: planted ${tier} faults (closed automatically)`,
             head: branches[tier],
@@ -206,7 +210,7 @@ export async function runRemote(
             body: 'Opened by falsegreen remote mode to run pull_request workflows with planted faults.',
             draft: true,
           });
-          pulls.push(data.number);
+          pulls.set(tier, data.number);
         }
       }
     }
@@ -287,7 +291,9 @@ export async function runRemote(
   } catch (err) {
     failure = err;
   } finally {
-    notes.push(...(await cleanup(gh, repo, [...started.values()], pulls, created, opts)));
+    notes.push(
+      ...(await cleanup(gh, repo, [...started.values()], [...pulls.values()], created, opts)),
+    );
   }
   if (failure !== undefined) throw failure;
   return result;

@@ -59,6 +59,8 @@ jobs:
           ./run-tests.sh
       - name: Announce
         run: ./notify --verify-tag --with-tests
+      - name: Shell string
+        run: bash -c "npm test && npm publish"
       - name: Script dir
         run: tools/check
       - name: Script with CI branches
@@ -187,6 +189,12 @@ describe('resolveGates', () => {
     expect(gate('Package').invocations.map((i) => [i.tool, i.argv.join(' ')])).toEqual([
       ['generic', './run-tests.sh'],
     ]);
+  });
+
+  it('reads the script inside bash -c, for its checks and for what it must never run', () => {
+    const g = gate('Shell string');
+    expect(g.invocations.map((i) => i.tool)).toEqual(['vitest']);
+    expect(g.unsafe).toBe('npm publish');
   });
 
   it('follows scripts named by a relative path and tools behind a ${PREFIX}', () => {

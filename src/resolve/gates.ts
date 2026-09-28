@@ -31,6 +31,7 @@ import { expandMatrix } from '../workflow/matrix';
 import type { JobModel, StepModel, WorkflowModel } from '../workflow/model';
 import { makeCall, makeDryRun } from './make';
 import { PRECOMMIT_CONFIG, precommitTools } from './precommit';
+import { releaseContext, unsafeCommand } from './safety';
 import { scriptCall, scriptFor } from './scripts';
 import { identify } from './tools';
 import { stripWrappers } from './wrappers';
@@ -83,6 +84,8 @@ export interface Gate {
   stagedOnly: StagedOnlyUse[];
   /** A command that must never be replayed (`npm publish`, `git push`, ...). */
   unsafe?: string;
+  /** Why the step's job releases or deploys; such steps are never replayed either. */
+  release?: string;
   fromAction?: string;
   job: JobModel;
   step: StepModel;
@@ -198,51 +201,7 @@ const UTILITIES = new Set([
   'nvm',
 ]);
 
-export function unsafeCommand(raw: string[]): string | undefined {
-  const argv = stripWrappers(raw).argv;
-  const [a, b] = argv;
-  if (a === undefined) return undefined;
-  const pair = `${a} ${b ?? ''}`.trim();
-  const publishers = [
-    'npm',
-    'pnpm',
-    'yarn',
-    'bun',
-    'cargo',
-    'poetry',
-    'uv',
-    'twine',
-    'flit',
-    'hatch',
-    'gem',
-    'dotnet',
-  ];
-  if (publishers.includes(a) && (b === 'publish' || b === 'upload' || b === 'push')) return pair;
-  const exact = [
-    'git push',
-    'docker push',
-    'gh release',
-    'kubectl apply',
-    'kubectl delete',
-    'terraform apply',
-    'terraform destroy',
-    'helm install',
-    'helm upgrade',
-    'netlify deploy',
-    'firebase deploy',
-    'wrangler deploy',
-    'wrangler publish',
-    'fly deploy',
-    'flyctl deploy',
-    'vercel deploy',
-  ];
-  if (exact.includes(pair)) return pair;
-  if (a === 'vercel' && argv.includes('--prod')) return 'vercel --prod';
-  if ((a === 'mvn' || a === 'mvnw') && argv.includes('deploy')) return 'mvn deploy';
-  if ((a === 'gradle' || a === 'gradlew') && argv.some((t) => /(^|:)publish/.test(t)))
-    return 'gradle publish';
-  return undefined;
-}
+export { unsafeCommand } from './safety';
 
 interface Walk {
   root: string;
@@ -388,6 +347,18 @@ function resolveCommand(
   }
 
   const [head] = argv;
+  // `bash -c "npm test && npm publish"`: the string is a script of its own, with its own checks
+  // and its own commands that must never run.
+  if (head === 'bash' || head === 'sh' || head === 'zsh') {
+    const flagAt = argv.findIndex((a, i) => i > 0 && /^-[a-z]*c[a-z]*$/.test(a));
+    const inline = flagAt > 0 ? argv[flagAt + 1] : undefined;
+    if (inline !== undefined) {
+      const traced = w.traces.length;
+      const found = walkScript(inline, `${head} -c`, 'file', dir, [...via, label], w, depth + 1);
+      w.traces[traced]!.flags = argv.slice(1, flagAt + 1).join(' ');
+      return found;
+    }
+  }
   // `bash -e scripts/ci.sh`, `./ci.sh`, or `scripts/check` with no extension, as httpx does.
   const scriptPath =
     head === 'bash' || head === 'sh' || head === 'zsh'
@@ -471,6 +442,39 @@ function inputsOf(wf: WorkflowModel): Record<string, string> {
     }
   }
   return out;
+}
+
+/**
+ * The first command in each job that must never run on falsegreen's behalf, found by walking
+ * every step's script (package scripts, Makefiles and script files included), gates or not.
+ * Keyed by `workflow#job`.
+ */
+export function unsafeSteps(root: string, workflows: WorkflowModel[]): Map<string, string> {
+  const tracked = new Set(trackedFiles(root));
+  const found = new Map<string, string>();
+  for (const wf of workflows) {
+    for (const job of wf.jobs) {
+      for (const step of job.steps) {
+        if (step.run === undefined) continue;
+        const w: Walk = {
+          root,
+          tracked,
+          invocations: [],
+          traces: [],
+          notes: [],
+          ifPresent: [],
+          stagedOnly: [],
+        };
+        const dir =
+          step.workingDirectory ?? job.defaults.workingDirectory ?? wf.defaults.workingDirectory;
+        const cwd = dir === undefined || dir.includes('${{') ? '' : normalizeDir('', dir);
+        walkScript(step.run, 'run', 'run', cwd, [], w, 0);
+        const key = `${wf.file}#${job.id}`;
+        if (w.unsafe !== undefined && !found.has(key)) found.set(key, w.unsafe);
+      }
+    }
+  }
+  return found;
 }
 
 export function resolveGates(
@@ -696,6 +700,8 @@ function resolveStep(
   if (run) gate.run = run.text;
   if (shell !== undefined) gate.shell = shell;
   if (w.unsafe !== undefined) gate.unsafe = w.unsafe;
+  const release = releaseContext(wf, job, step);
+  if (release !== undefined) gate.release = release;
   if (step.fromAction !== undefined) gate.fromAction = step.fromAction;
   return gate;
 }

@@ -83,7 +83,7 @@ describe('remoteCommand', () => {
   it('fails with the reason when the plan is refused', async () => {
     const { root, fake } = setup({
       '.github/workflows/release.yml':
-        'on: push\njobs:\n  publish:\n    steps:\n      - run: npm publish\n',
+        'on: push\njobs:\n  build:\n    steps:\n      - run: npm publish\n',
     });
     await expect(remoteCommand(options(root, fake), io)).rejects.toThrow(/refused.*npm publish/);
   });

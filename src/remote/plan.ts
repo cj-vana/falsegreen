@@ -1,12 +1,13 @@
 /**
  * Which workflows a remote run starts, and how. Printed before anything is written, and refused
- * outright when pushing the throwaway branch would start a workflow that deploys or publishes.
+ * outright when the push, or the draft pull request with --pr, would start a workflow that deploys
+ * or publishes. Every workflow the run starts is listed, whether it has gates or not.
  */
 import { posix } from 'node:path';
 
 import type { Tier } from '../core/types';
-import { unsafeCommand, type Gate } from '../resolve/gates';
-import { allCommands, parseShell, words } from '../shell/parse';
+import type { Gate } from '../resolve/gates';
+import { releaseContext } from '../resolve/safety';
 import type { WorkflowModel } from '../workflow/model';
 import { pushStarts } from '../workflow/triggers';
 import type { TokenKind } from './token';
@@ -15,6 +16,8 @@ export interface RemotePlanEntry {
   workflow: string;
   start: 'push' | 'dispatch' | 'pr' | 'skip';
   reason: string;
+  /** false for a workflow the push or pull request starts that has no gates to judge. */
+  judged?: false;
 }
 
 export interface RemotePlan {
@@ -27,22 +30,34 @@ export interface RemotePlan {
   refused?: string;
 }
 
-const DEPLOY_ACTION = /deploy|publish|release/i;
+/** Actions that deploy, publish, release or copy to a server. */
+const DEPLOY_ACTION =
+  /deploy|publish|release|pages|build-push|ssh-action|scp-action|wrangler|changesets\/action/i;
 
-/** Why a workflow looks like it deploys or publishes; undefined when it does not. */
-export function unsafeReason(wf: WorkflowModel): string | undefined {
+/**
+ * Why a workflow deploys or publishes; undefined when nothing says so. `unsafeRuns` holds the
+ * first publishing or repository-rewriting command in each job, found by walking its scripts.
+ */
+export function unsafeReason(
+  wf: WorkflowModel,
+  unsafeRuns: Map<string, string> = new Map(),
+): string | undefined {
   for (const job of wf.jobs) {
-    if (job.environment !== undefined) return `job ${job.id} uses environment ${job.environment}`;
+    // Names, environments and tag-only triggers; a step named "Deploy" counts too.
+    const named = [undefined, ...job.steps]
+      .map((step) => releaseContext(wf, job, step))
+      .find((r) => r !== undefined);
+    if (named !== undefined) return named;
+    if (job.usesWorkflow !== undefined) {
+      return `job ${job.id} calls ${job.usesWorkflow}, which falsegreen does not inspect`;
+    }
     for (const step of job.steps) {
       if (step.uses !== undefined && DEPLOY_ACTION.test(step.uses.split('@')[0]!)) {
         return `job ${job.id} uses ${step.uses}`;
       }
-      if (step.run === undefined) continue;
-      for (const cmd of allCommands(parseShell(step.run))) {
-        const unsafe = unsafeCommand(words(cmd));
-        if (unsafe) return `job ${job.id} runs ${unsafe}`;
-      }
     }
+    const run = unsafeRuns.get(`${wf.file}#${job.id}`);
+    if (run !== undefined) return `job ${job.id} runs ${run}`;
   }
   return undefined;
 }
@@ -56,40 +71,71 @@ export function planRemote(
     pr: boolean;
     branches: Record<Tier, string>;
     changedPaths: string[];
+    unsafeRuns?: Map<string, string>;
   },
 ): Pick<RemotePlan, 'entries' | 'refused'> {
   const allowed = (wf: WorkflowModel): boolean =>
     opts.allow.includes(posix.basename(wf.file)) || opts.allow.includes(wf.file);
+  const unsafe = (wf: WorkflowModel): string | undefined =>
+    allowed(wf) ? undefined : unsafeReason(wf, opts.unsafeRuns);
   const pushWorks = opts.tokenKind !== 'github-token';
   const branch = opts.branches.reach;
 
-  // A push starts every matching workflow, gates or not, so check them all before pushing.
-  if (pushWorks) {
-    for (const wf of workflows) {
-      const unsafe = unsafeReason(wf);
-      if (unsafe && !allowed(wf) && pushStarts(wf, branch, opts.changedPaths)) {
-        return {
-          entries: [],
-          refused: `pushing the branch would start ${wf.file}, where ${unsafe}; add ${posix.basename(wf.file)} to remote.allow in falsegreen.config.yml to run it anyway`,
-        };
-      }
+  // What the run sets off whether falsegreen wants it or not: pushing a branch (and creating it)
+  // starts push and create workflows, and a draft pull request starts pull_request ones.
+  const byPush = (wf: WorkflowModel): boolean =>
+    pushWorks &&
+    (pushStarts(wf, branch, opts.changedPaths) ||
+      wf.triggers.other.includes('create') ||
+      wf.triggers.other.includes('delete'));
+  const byPr = (wf: WorkflowModel): boolean =>
+    pushWorks &&
+    opts.pr &&
+    (wf.triggers.pullRequest !== undefined || wf.triggers.pullRequestTarget !== undefined);
+  const gated = new Set(gates.map((g) => g.workflow));
+  const opensPr = workflows.some((wf) => gated.has(wf.file) && byPr(wf) && !byPush(wf));
+
+  for (const wf of workflows) {
+    const reason = unsafe(wf);
+    if (reason === undefined) continue;
+    const how = byPush(wf)
+      ? 'pushing the branch'
+      : opensPr && byPr(wf)
+        ? 'opening the pull request'
+        : undefined;
+    if (how !== undefined) {
+      return {
+        entries: [],
+        refused: `${how} would start ${wf.file}, where ${reason}; add ${posix.basename(wf.file)} to remote.allow in falsegreen.config.yml to run it anyway`,
+      };
     }
   }
 
-  const gated = new Set(gates.map((g) => g.workflow));
   const entries: RemotePlanEntry[] = [];
-  for (const wf of workflows.filter((w) => gated.has(w.file))) {
-    const unsafe = allowed(wf) ? undefined : unsafeReason(wf);
+  for (const wf of workflows) {
     const entry = (start: RemotePlanEntry['start'], reason: string): void => {
       entries.push({ workflow: wf.file, start, reason });
     };
-    if (pushWorks && pushStarts(wf, branch, opts.changedPaths)) {
+    if (!gated.has(wf.file)) {
+      const how = byPush(wf) ? 'push' : opensPr && byPr(wf) ? 'pr' : undefined;
+      if (how !== undefined) {
+        entries.push({
+          workflow: wf.file,
+          start: how,
+          reason: `${how === 'push' ? 'pushing the branch' : 'the pull request'} starts it too; it has no gates to judge`,
+          judged: false,
+        });
+      }
+      continue;
+    }
+    const reason = unsafe(wf);
+    if (byPush(wf)) {
       entry('push', 'pushing the branch starts it');
-    } else if (unsafe) {
-      entry('skip', `not started: ${unsafe}; add it to remote.allow to run it`);
+    } else if (reason !== undefined) {
+      entry('skip', `not started: ${reason}; add it to remote.allow to run it`);
     } else if (wf.triggers.workflowDispatch) {
       entry('dispatch', 'dispatched on the branch');
-    } else if (wf.triggers.pullRequest) {
+    } else if (wf.triggers.pullRequest || wf.triggers.pullRequestTarget) {
       if (!pushWorks) {
         entry(
           'skip',

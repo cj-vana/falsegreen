@@ -152,9 +152,88 @@ describe('runRemote', () => {
     const { loaded, sha } = setup({ '.github/workflows/deploy.yml': deploy });
     const { client, state } = fake(sha);
     const result = await runRemote(loaded, client, 'o/r', options(), quiet);
-    expect(result.plan.refused).toMatch(/deploy\.yml.*environment production.*remote\.allow/);
+    expect(result.plan.refused).toMatch(/deploy\.yml.*production environment.*remote\.allow/);
     expect(result.ran).toBe(false);
     expect(writes(state.calls)).toEqual([]);
+  });
+
+  it.each([
+    [
+      'a job named like a release',
+      'on: push\njobs:\n  publish-npm:\n    steps:\n      - run: npm ci\n',
+      /job publish-npm is named like a release or deploy job/,
+    ],
+    [
+      'a publisher behind a package script',
+      'on: push\njobs:\n  build:\n    steps:\n      - run: npm run ship\n',
+      /job build runs changeset publish/,
+    ],
+    [
+      'a deploy action',
+      'on: push\njobs:\n  docs:\n    steps:\n      - uses: peaceiris/actions-gh-pages@v4\n',
+      /job docs uses peaceiris\/actions-gh-pages@v4/,
+    ],
+    [
+      'a reusable workflow',
+      'on: push\njobs:\n  ship:\n    uses: ./.github/workflows/ship.yml\n',
+      /job ship calls \.\/\.github\/workflows\/ship\.yml, which falsegreen does not inspect/,
+    ],
+  ])('refuses when the push would start %s', async (_what, workflow, reason) => {
+    const { loaded, sha } = setup({
+      '.github/workflows/other.yml': workflow,
+      'package.json':
+        '{ "name": "fx", "private": true, "scripts": { "ship": "changeset publish" } }\n',
+    });
+    const { client, state } = fake(sha);
+    const result = await runRemote(loaded, client, 'o/r', options(), quiet);
+    expect(result.plan.refused).toMatch(reason);
+    expect(writes(state.calls)).toEqual([]);
+  });
+
+  it('refuses a deploy that the draft pull request would start, with --pr', async () => {
+    const deploy =
+      'on: pull_request\njobs:\n  preview:\n    environment: preview\n    steps:\n      - run: ./preview.sh\n';
+    // pr.yml has a gate and runs only on pull_request, so --pr opens a pull request for it.
+    const { loaded, sha } = setup({
+      '.github/workflows/preview.yml': deploy,
+      '.github/workflows/pr.yml':
+        'on: pull_request\njobs:\n  test:\n    steps:\n      - run: node --test\n',
+    });
+    const withPr = await runRemote(loaded, fake(sha).client, 'o/r', options({ pr: true }), quiet);
+    expect(withPr.plan.refused).toMatch(/opening the pull request would start .*preview\.yml/);
+    // Without --pr no pull request is opened, so nothing starts it.
+    const without = await runRemote(
+      loaded,
+      fake(sha).client,
+      'o/r',
+      options({ yes: false }),
+      quiet,
+    );
+    expect(without.plan.refused).toBeUndefined();
+  });
+
+  it('shows every workflow the push starts in the plan, gates or not', async () => {
+    const docs = 'on: push\njobs:\n  docs:\n    steps:\n      - run: echo building docs\n';
+    const { loaded, sha } = setup({ '.github/workflows/docs.yml': docs });
+    const result = await runRemote(loaded, fake(sha).client, 'o/r', options({ yes: false }), quiet);
+    expect(result.plan.entries.find((e) => e.workflow.endsWith('docs.yml'))).toEqual({
+      workflow: '.github/workflows/docs.yml',
+      start: 'push',
+      reason: 'pushing the branch starts it too; it has no gates to judge',
+      judged: false,
+    });
+  });
+
+  it('opens one draft pull request per branch, however many workflows it starts', async () => {
+    const pr = (name: string) =>
+      `on: pull_request\njobs:\n  ${name}:\n    steps:\n      - run: node --test\n`;
+    const { loaded, sha } = setup({
+      '.github/workflows/pr-a.yml': pr('a'),
+      '.github/workflows/pr-b.yml': pr('b'),
+    });
+    const { client, state } = fake(sha);
+    await runRemote(loaded, client, 'o/r', options({ pr: true }), quiet);
+    expect(state.pulls).toHaveLength(2);
   });
 
   it('runs a deploy-looking workflow that is allowlisted', async () => {

@@ -132,6 +132,29 @@ describe('replayGates', () => {
     expect(existsSync(join(root, 'ran.txt'))).toBe(false);
   });
 
+  it('never replays a step in a release or deploy job', async () => {
+    // `npm run release` could hide a publisher falsegreen does not know by name.
+    repo = makeRepo({
+      '.github/workflows/release.yml': [
+        'on: [push]',
+        'jobs:',
+        '  ship:',
+        '    environment: npm',
+        '    steps:',
+        '      - run: touch ran.txt && npx vitest run',
+      ].join('\n'),
+      'package.json': JSON.stringify({ private: true }),
+    });
+    const root = repo.root;
+    const { gates } = resolveAll(root, loadWorkflows(root), loadConfig(root), { matrix: 'first' });
+    const r = await replay(root, gates[0]!);
+    expect(r.status).toBe('unjudged');
+    expect(r.reason).toBe(
+      'falsegreen does not replay steps of release or deploy jobs: job ship deploys to the npm environment',
+    );
+    expect(existsSync(join(root, 'ran.txt'))).toBe(false);
+  });
+
   it('refuses a command it could not rebuild', async () => {
     const { root, gate } = setup();
     const r = await replay(root, { ...gate, unresolved: ['secrets.TOKEN'] });

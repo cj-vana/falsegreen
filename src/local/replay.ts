@@ -107,6 +107,10 @@ export function refusal(gate: Gate): string | undefined {
   if (gate.kind === 'uses') return 'runs a GitHub Action; use falsegreen remote to judge it';
   if (gate.unsafe !== undefined)
     return `the step also runs \`${gate.unsafe}\`, which falsegreen never replays`;
+  // A release job's own scripts may publish in ways no command list recognizes.
+  if (gate.release !== undefined) {
+    return `falsegreen does not replay steps of release or deploy jobs: ${gate.release}`;
+  }
   if (gate.unresolved.length > 0) {
     return `the command uses ${gate.unresolved.map((e) => `\${{ ${e} }}`).join(', ')}, which cannot be rebuilt locally`;
   }
