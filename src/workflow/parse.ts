@@ -176,6 +176,43 @@ interface RawStep {
 
 const MAX_ACTION_DEPTH = 5;
 
+/** An `if` condition without its optional `${{ }}` wrapper. */
+function bareCondition(cond: string): string {
+  const s = cond.trim();
+  return s.startsWith('${{') && s.endsWith('}}') ? s.slice(3, -2).trim() : s;
+}
+
+/**
+ * Gives steps inlined from a composite action what they take from the step that called it. A
+ * failing inner step fails the caller, so the caller's continue-on-error covers it; it runs only
+ * when the caller's `if` holds; and it starts from the caller's env.
+ */
+function inheritFromCaller(caller: Rec, steps: RawStep[]): RawStep[] {
+  const outerCoe = continueOnErrorOf(caller['continue-on-error']);
+  const outerIf = str(caller.if);
+  const outerEnv = isRecord(caller.env) ? caller.env : {};
+  return steps.map((raw) => {
+    const data: Rec = { ...raw.data };
+    const ownCoe = continueOnErrorOf(data['continue-on-error']);
+    const coe =
+      ownCoe === true || outerCoe === true
+        ? true
+        : typeof ownCoe === 'string'
+          ? ownCoe
+          : (outerCoe ?? ownCoe);
+    if (coe !== undefined) data['continue-on-error'] = coe;
+    const ownIf = str(data.if);
+    if (outerIf !== undefined) {
+      data.if =
+        ownIf === undefined ? outerIf : `(${bareCondition(outerIf)}) && (${bareCondition(ownIf)})`;
+    }
+    if (Object.keys(outerEnv).length > 0) {
+      data.env = { ...outerEnv, ...(isRecord(data.env) ? data.env : {}) };
+    }
+    return { ...raw, data };
+  });
+}
+
 /** Replaces a local composite action step by its steps; undefined when it is not one. */
 function inlineComposite(
   root: string,
@@ -222,7 +259,7 @@ function inlineComposite(
       typeof data.uses === 'string' && data.uses.startsWith('./')
         ? inlineComposite(root, data.uses, stringMap(data.with), line, depth + 1)
         : undefined;
-    if (nested) out.push(...nested);
+    if (nested) out.push(...inheritFromCaller(data, nested));
     else out.push({ data, line, fromAction: uses });
   }
   return out;
@@ -299,7 +336,7 @@ export function parseWorkflow(file: string, text: string, root: string): Workflo
       if (typeof data.uses === 'string' && data.uses.startsWith('./')) {
         const inlined = inlineComposite(root, data.uses, stringMap(data.with), line, 1);
         if (inlined) {
-          rawSteps.push(...inlined);
+          rawSteps.push(...inheritFromCaller(data, inlined));
           return;
         }
       }

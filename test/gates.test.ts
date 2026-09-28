@@ -47,6 +47,16 @@ jobs:
         run: ./custom-runner
       - name: Lint via make
         run: make nosuch
+      - name: Build the site
+        run: |
+          # The check job reads what this writes.
+          die() { echo "$1"; exit 1; }
+          test -d public || die "no public dir"
+          ./build.sh
+      - name: Package
+        run: |
+          ./configure --prefix=dist
+          ./run-tests.sh
   matrix:
     strategy:
       matrix:
@@ -138,6 +148,13 @@ describe('resolveGates', () => {
     const g = gate('Run checks');
     expect(g.invocations.map((i) => [i.tool, i.argv.join(' ')])).toEqual([
       ['generic', './tools/verify --strict'],
+    ]);
+  });
+
+  it('looks for check words in commands, not in comments, builtins or local functions', () => {
+    expect(gates.find((g) => g.stepName === 'Build the site')).toBeUndefined();
+    expect(gate('Package').invocations.map((i) => [i.tool, i.argv.join(' ')])).toEqual([
+      ['generic', './run-tests.sh'],
     ]);
   });
 

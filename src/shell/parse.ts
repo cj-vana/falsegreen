@@ -36,6 +36,8 @@ export interface AndOrList {
 
 export interface ShellScript {
   lists: AndOrList[];
+  /** Names of the functions the script defines; calls to them are not external commands. */
+  functions: string[];
   errors: string[];
 }
 
@@ -76,6 +78,9 @@ function toWord(raw: RawWord): Word {
 export function parseShell(text: string, base = 0): ShellScript {
   const { tokens, errors } = lex(text, base);
   const lists: AndOrList[] = [];
+  const functions: string[] = [];
+  // Set after the `function` keyword: the next word names the function.
+  let functionName = false;
 
   let cmd: SimpleCommand | null = null;
   let pipeline: Pipeline = { commands: [], negated: false };
@@ -109,7 +114,7 @@ export function parseShell(text: string, base = 0): ShellScript {
     list = null;
   };
 
-  for (const token of tokens) {
+  for (const [i, token] of tokens.entries()) {
     if (token.kind === 'redir') {
       skipTarget = true;
       continue;
@@ -131,9 +136,15 @@ export function parseShell(text: string, base = 0): ShellScript {
         }
         continue;
       }
+      if (functionName) {
+        functions.push(raw.value);
+        functionName = false;
+        continue;
+      }
       const atStart = !cmd || (cmd.argv.length === 0 && cmd.assignments.length === 0);
       if (atStart && RESERVED.has(raw.value) && raw.raw === raw.value) {
         if (raw.value === '!') pipeline.negated = true;
+        else if (raw.value === 'function') functionName = true;
         else if (raw.value === 'for' || raw.value === 'select') skipUntilSeparator = true;
         else if (raw.value === 'case') {
           caseDepth++;
@@ -190,13 +201,28 @@ export function parseShell(text: string, base = 0): ShellScript {
       case '&':
         flushList(true);
         break;
-      case '(':
+      case '(': {
+        // `name() {` defines a function: the name is not a command, and `()` ends nothing.
+        const next = tokens[i + 1];
+        const c: SimpleCommand | null = cmd;
+        if (
+          c !== null &&
+          c.argv.length === 1 &&
+          c.assignments.length === 0 &&
+          next?.kind === 'op' &&
+          next.op === ')'
+        ) {
+          functions.push(c.argv[0]!.value);
+          cmd = null;
+          break;
+        }
         flushCommand();
         break;
+      }
     }
   }
   flushList(false);
-  return { lists, errors };
+  return { lists, functions, errors };
 }
 
 export function words(cmd: SimpleCommand): string[] {

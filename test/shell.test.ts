@@ -55,6 +55,27 @@ describe('parseShell', () => {
     expect(words(cmds[1]!)).toEqual(['npx', 'vitest', 'run']);
   });
 
+  it('records function definitions and keeps only their bodies as commands', () => {
+    const text = [
+      'fail() {',
+      '  echo failed',
+      '  exit 1',
+      '}',
+      'function warn { echo warned; }',
+      'function note() { echo noted; }',
+      'npm test || fail now',
+    ].join('\n');
+    expect(parseShell(text).functions).toEqual(['fail', 'warn', 'note']);
+    expect(argvs(text)).toEqual([
+      ['echo', 'failed'],
+      ['exit', '1'],
+      ['echo', 'warned'],
+      ['echo', 'noted'],
+      ['npm', 'test'],
+      ['fail', 'now'],
+    ]);
+  });
+
   it('finds commands inside compound commands', () => {
     expect(argvs('if [ -f x ]; then\n  cargo test\nfi')).toEqual([
       ['[', '-f', 'x', ']'],

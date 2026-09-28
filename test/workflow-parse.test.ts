@@ -155,6 +155,60 @@ describe('parseWorkflow edge cases', () => {
     expect(steps.map((s) => s.index)).toEqual([0, 1, 2, 3]);
   });
 
+  it("gives inlined steps the calling step's continue-on-error, if and env", () => {
+    repo = makeRepo({
+      '.github/actions/outer/action.yml': [
+        'runs:',
+        '  using: composite',
+        '  steps:',
+        '    - run: npm test',
+        '      shell: bash',
+        '      env:',
+        '        B: inner',
+        '    - uses: ./.github/actions/inner',
+        '      if: runner.os == needs.x.outputs.os',
+      ].join('\n'),
+      '.github/actions/inner/action.yml': [
+        'runs:',
+        '  using: composite',
+        '  steps:',
+        '    - run: npm run lint',
+        '      shell: bash',
+        '      continue-on-error: ${{ inputs.lenient }}',
+      ].join('\n'),
+      '.github/workflows/ci.yml': [
+        'on: push',
+        'jobs:',
+        '  test:',
+        '    steps:',
+        '      - uses: ./.github/actions/outer',
+        '        continue-on-error: true',
+        "        if: github.event_name == 'push'",
+        '        env:',
+        '          A: outer',
+        '          B: outer',
+        '      - uses: ./.github/actions/inner',
+        '        continue-on-error: ${{ matrix.experimental }}',
+      ].join('\n'),
+    });
+    const [wf] = loadWorkflows(repo.root);
+    const [test, lint, lenient] = wf!.jobs[0]!.steps;
+    expect(test).toMatchObject({
+      run: 'npm test',
+      continueOnError: true,
+      if: "github.event_name == 'push'",
+      env: { A: 'outer', B: 'inner' },
+    });
+    expect(lint).toMatchObject({
+      run: 'npm run lint',
+      continueOnError: true,
+      if: "(github.event_name == 'push') && (runner.os == needs.x.outputs.os)",
+      env: { A: 'outer', B: 'outer' },
+    });
+    // The inner step's own expression stays when the caller's is only an expression too.
+    expect(lenient!.continueOnError).toBe('${{ inputs.lenient }}');
+  });
+
   it('loads only the workflows asked for', () => {
     repo = makeRepo({
       '.github/workflows/ci.yml': 'on: push\njobs: {}\n',

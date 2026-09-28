@@ -551,13 +551,19 @@ function resolveStep(
 
   if (run) {
     walkScript(run.text, 'run', 'run', workingDirectory, [], w, 0);
-    if (w.invocations.length === 0 && CHECK_NAMED.test(`${step.name ?? ''} ${run.text}`)) {
+    if (w.invocations.length === 0) {
       const trace = w.traces[0]!;
-      const cmd = allCommands(trace.script).find((c) => {
-        // `python3 -m compileall` is a check; `python3` alone is only a launcher.
+      // Utilities and the script's own functions are never the check. `python3 -m compileall`
+      // is one; `python3` alone is only a launcher, so wrappers are stripped first.
+      const candidates = allCommands(trace.script).filter((c) => {
         const head = stripWrappers(words(c)).argv[0];
-        return head !== undefined && !UTILITIES.has(head);
+        return head !== undefined && !UTILITIES.has(head) && !trace.script.functions.includes(head);
       });
+      // A check-named step runs its first candidate; otherwise a candidate has to name a check
+      // itself. Comments and echo text say nothing about what runs.
+      const cmd = CHECK_NAMED.test(step.name ?? '')
+        ? candidates[0]
+        : candidates.find((c) => CHECK_NAMED.test(words(c).join(' ')));
       if (cmd) {
         // The static shell rules look for masking around this command, like any other gate.
         trace.gateCommands.push(cmd);
