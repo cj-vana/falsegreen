@@ -64,12 +64,40 @@ class CappedOutput {
   }
 }
 
+/** How long after its shell exits a step's leftover background processes get to finish writing. */
+const EXIT_GRACE_MS = 1_000;
+
 function killGroup(pid: number, signal: NodeJS.Signals): void {
   try {
     process.kill(-pid, signal);
   } catch {
     // The group is already gone.
   }
+}
+
+function groupAlive(pid: number): boolean {
+  try {
+    process.kill(-pid, 0);
+    return true;
+  } catch (err) {
+    return (err as NodeJS.ErrnoException).code === 'EPERM';
+  }
+}
+
+/** Process groups of steps that are running now. */
+const liveGroups = new Set<number>();
+
+/**
+ * Ends every running step and everything it started: SIGTERM, then SIGKILL for what is left after
+ * a grace period. Synchronous, for signal handlers that exit right after.
+ */
+export function stopLiveGroups(): void {
+  const groups = [...liveGroups];
+  for (const pid of groups) killGroup(pid, 'SIGTERM');
+  const tick = new Int32Array(new SharedArrayBuffer(4));
+  const deadline = Date.now() + KILL_GRACE_MS;
+  while (groups.some(groupAlive) && Date.now() < deadline) Atomics.wait(tick, 0, 0, 50);
+  for (const pid of groups) killGroup(pid, 'SIGKILL');
 }
 
 export function runProcess(cmd: string, args: string[], opts: ProcOptions): Promise<ProcResult> {
@@ -89,11 +117,21 @@ export function runProcess(cmd: string, args: string[], opts: ProcOptions): Prom
       stdio: ['ignore', 'pipe', 'pipe'],
     });
 
+    const pid = child.pid;
+    if (pid !== undefined) liveGroups.add(pid);
+    let exitTimer: NodeJS.Timeout | undefined;
+
     const finish = (exitCode: number | null, signal: string | null): void => {
       if (settled) return;
       settled = true;
       clearTimeout(timer);
       if (killTimer) clearTimeout(killTimer);
+      if (exitTimer) clearTimeout(exitTimer);
+      if (pid !== undefined) {
+        liveGroups.delete(pid);
+        // A runner ends what a step left running; so does a replay.
+        killGroup(pid, 'SIGKILL');
+      }
       resolve({
         exitCode: spawnError ? null : exitCode,
         signal,
@@ -116,6 +154,12 @@ export function runProcess(cmd: string, args: string[], opts: ProcOptions): Prom
     child.on('error', (err: NodeJS.ErrnoException) => {
       spawnError = `${err.code ?? 'ERROR'}: ${err.message}`;
       finish(null, null);
+    });
+    // A background process that inherited stdout keeps 'close' from firing after the shell exits;
+    // give it a moment to finish writing, then end the group so the run can finish.
+    child.on('exit', () => {
+      if (pid === undefined) return;
+      exitTimer = setTimeout(() => killGroup(pid, 'SIGTERM'), EXIT_GRACE_MS);
     });
     child.on('close', (code, signal) => {
       // A timed-out shell can exit before the children it started; make sure they go too.

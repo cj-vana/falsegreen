@@ -18,6 +18,7 @@ import { hostname } from 'node:os';
 import { isAbsolute, join, posix } from 'node:path';
 
 import { addIntentToAdd, isModified, resetPaths, statusPorcelain } from '../core/git';
+import { stopLiveGroups } from '../core/proc';
 import type { Fault } from '../faults/types';
 import { journalPath, readJournal, removeJournal, writeJournal, type Journal } from './journal';
 
@@ -246,6 +247,8 @@ const SIGNAL_EXIT: Record<'SIGINT' | 'SIGTERM' | 'SIGHUP', number> = {
 export function installSignalRevert(): () => void {
   const offs = (Object.keys(SIGNAL_EXIT) as (keyof typeof SIGNAL_EXIT)[]).map((signal) => {
     const handler = (): void => {
+      // The step goes first: left running, it would carry on against the restored tree.
+      stopLiveGroups();
       revertAll();
       process.exit(SIGNAL_EXIT[signal]);
     };

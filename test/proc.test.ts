@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 
-import { runProcess } from '../src/core/proc';
+import { runProcess, stopLiveGroups } from '../src/core/proc';
 
 const base = { cwd: process.cwd(), env: process.env, timeoutMs: 10_000 };
 
@@ -37,6 +37,29 @@ describe('runProcess', () => {
     const pid = Number(/child (\d+)/.exec(r.output)?.[1]);
     expect(pid).toBeGreaterThan(0);
     await new Promise((resolve) => setTimeout(resolve, 200));
+    expect(alive(pid)).toBe(false);
+  });
+
+  it('ends background processes a step leaves behind, as a runner does', async () => {
+    // The background sleep holds stdout open; before, the run waited for it until the timeout.
+    const started = Date.now();
+    const r = await runProcess('sh', ['-c', 'sleep 30 & echo "child $!"'], base);
+    expect(r.exitCode).toBe(0);
+    expect(r.timedOut).toBe(false);
+    expect(Date.now() - started).toBeLessThan(5_000);
+    const pid = Number(/child (\d+)/.exec(r.output)?.[1]);
+    await new Promise((resolve) => setTimeout(resolve, 200));
+    expect(alive(pid)).toBe(false);
+  });
+
+  it('stops every running step when asked, for Ctrl-C and SIGTERM', async () => {
+    const started = Date.now();
+    const running = runProcess('sh', ['-c', 'sleep 30 & echo "child $!"; wait'], base);
+    await new Promise((resolve) => setTimeout(resolve, 300));
+    stopLiveGroups();
+    const r = await running;
+    expect(Date.now() - started).toBeLessThan(5_000);
+    const pid = Number(/child (\d+)/.exec(r.output)?.[1]);
     expect(alive(pid)).toBe(false);
   });
 

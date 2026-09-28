@@ -5,6 +5,7 @@ import { join } from 'node:path';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import { statusPorcelain, trackedFiles } from '../src/core/git';
+import { runProcess } from '../src/core/proc';
 import type { Marker } from '../src/core/marker';
 import type { Fault } from '../src/faults/types';
 import { journalPath, type Journal } from '../src/plant/journal';
@@ -218,6 +219,33 @@ describe('journal recovery', () => {
 });
 
 describe('signal handling', () => {
+  it('stops the running step before it reverts, so the step cannot outlive the run', async () => {
+    const r = newRepo();
+    const exit = vi.spyOn(process, 'exit').mockImplementation(((code?: number) => {
+      throw new Error(`exit ${code}`);
+    }) as never);
+    const uninstall = installSignalRevert();
+    try {
+      plant(r.root, fault());
+      const running = runProcess('sh', ['-c', 'sleep 30 & echo "child $!"; wait'], {
+        cwd: r.root,
+        env: process.env,
+        timeoutMs: 60_000,
+      });
+      await new Promise((resolve) => setTimeout(resolve, 300));
+      const interrupted = Date.now();
+      expect(() => process.emit('SIGINT')).toThrow('exit 130');
+      const pid = Number(/child (\d+)/.exec((await running).output)?.[1]);
+      // Not left to run out its 30 seconds against the restored tree.
+      expect(Date.now() - interrupted).toBeLessThan(5_000);
+      expect(() => process.kill(pid, 0)).toThrow();
+      expect(statusPorcelain(r.root)).toBe('');
+    } finally {
+      uninstall();
+      exit.mockRestore();
+    }
+  });
+
   it('reverts live plantings on SIGTERM and exits with 143', () => {
     const r = newRepo();
     const exit = vi.spyOn(process, 'exit').mockImplementation(((code?: number) => {
