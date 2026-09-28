@@ -32,12 +32,16 @@ export async function runStep(
     writeFileSync(script, `${gate.run ?? ''}\n`);
     const command = shellCommand(gate.shell, script);
     if ('unsupported' in command) return refused(`shell ${command.unsupported} cannot run here`);
-    return await runProcess(command.cmd, command.args, {
+    const result = await runProcess(command.cmd, command.args, {
       cwd,
       // What a runner sets comes first, so the workflow's own env can still override it.
       env: { ...process.env, ...RUNNER_ENV, ...gate.env },
       timeoutMs: opts.timeoutMs,
     });
+    if (result.spawnError?.includes('ENOENT')) {
+      return refused(`the step runs under ${command.cmd}, which is not installed here`);
+    }
+    return result;
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }

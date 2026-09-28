@@ -52,4 +52,13 @@ describe('runStep', () => {
     expect(r.exitCode).toBe(0);
     expect(r.output.trim()).toBe('step env');
   });
+
+  it('says which shell is missing when a custom shell is not installed', async () => {
+    // spf13/cobra's Windows job runs its steps under `shell: msys2 {0}`.
+    const gate = fakeGate({ run: 'make test', shell: 'falsegreen-no-such-shell {0}' });
+    const r = await runStep(makeTempDir('step'), gate, { timeoutMs: 10_000 });
+    expect(r.spawnError).toBe(
+      'the step runs under falsegreen-no-such-shell, which is not installed here',
+    );
+  });
 });
