@@ -187,7 +187,7 @@ const UTILITIES = new Set([
   'nvm',
 ]);
 
-function unsafeCommand(raw: string[]): string | undefined {
+export function unsafeCommand(raw: string[]): string | undefined {
   const argv = stripWrappers(raw).argv;
   const [a, b] = argv;
   if (a === undefined) return undefined;

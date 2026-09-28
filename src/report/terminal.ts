@@ -42,6 +42,30 @@ export function renderTerminal(report: Report, color: boolean): string {
     lines.push('');
   }
 
+  const remote = report.remote;
+  if (remote) {
+    lines.push(
+      c.bold(`Remote runs on ${remote.plan.repo} (base ${remote.plan.baseSha.slice(0, 7)})`),
+    );
+    if (remote.plan.refused) lines.push(c.red(`  refused: ${remote.plan.refused}`));
+    for (const e of remote.plan.entries) {
+      lines.push(`  ${e.workflow}  ${e.start.padEnd(9)}${c.dim(e.reason)}`);
+    }
+    if (!remote.ran && !remote.plan.refused)
+      lines.push(c.yellow('  plan only: pass --yes to run it'));
+    for (const [workflow, jobs] of groupBy(remote.jobs, (j) => j.workflow)) {
+      lines.push(`  ${workflow}`);
+      for (const [job, results] of groupBy(jobs, (j) => j.job)) {
+        const tiers = results.map(
+          (r) => `${r.tier} ${verdict(r.verdict === 'skipped' ? 'unjudged' : r.verdict)}`,
+        );
+        lines.push(`    job ${job.padEnd(20)}${tiers.join('')}${c.dim(results[0]?.runUrl ?? '')}`);
+      }
+    }
+    for (const note of remote.notes) lines.push(c.dim(`  note: ${note}`));
+    lines.push('');
+  }
+
   for (const error of report.errors) lines.push(c.yellow(`error: ${error}`));
 
   if (report.findings.length > 0) {

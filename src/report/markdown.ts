@@ -42,6 +42,26 @@ export function renderMarkdown(report: Report): string {
     lines.push('');
   }
 
+  const remote = report.remote;
+  if (remote && remote.jobs.length > 0) {
+    lines.push(
+      `### Remote runs on ${remote.plan.repo}`,
+      '',
+      '| Workflow | Job | Reach | Semantic |',
+      '| --- | --- | --- | --- |',
+    );
+    const jobs = new Map<string, typeof remote.jobs>();
+    for (const j of remote.jobs)
+      jobs.set(`${j.workflow}#${j.job}`, [...(jobs.get(`${j.workflow}#${j.job}`) ?? []), j]);
+    for (const results of jobs.values()) {
+      const tier = (t: string): string => results.find((r) => r.tier === t)?.verdict ?? '';
+      lines.push(
+        `| ${results[0]!.workflow} | ${cell(results[0]!.job)} | ${tier('reach')} | ${tier('semantic')} |`,
+      );
+    }
+    lines.push('');
+  }
+
   if (report.findings.length > 0) {
     lines.push(
       '### Findings',

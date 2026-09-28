@@ -154,6 +154,50 @@ describe('explained dead gates', () => {
   });
 });
 
+describe('remote summary', () => {
+  it('counts remotely judged jobs and their verdicts', () => {
+    const job = (
+      name: string,
+      tier: 'reach' | 'semantic',
+      verdict: 'caught' | 'survived' | 'unjudged',
+    ) => ({
+      workflow: 'ci.yml',
+      job: name,
+      tier,
+      conclusion: null,
+      verdict,
+    });
+    const report = buildReport({
+      root: '/repo',
+      modes: ['static', 'remote'],
+      startedAt: new Date(),
+      gates: [fakeGate()],
+      results: [],
+      staticFindings: [],
+      cfg,
+      remote: {
+        plan: {
+          repo: 'o/r',
+          baseSha: 'abc',
+          tokenKind: 'personal-or-app',
+          branches: { reach: 'a', semantic: 'b' },
+          entries: [],
+        },
+        ran: true,
+        notes: [],
+        jobs: [
+          job('test', 'reach', 'caught'),
+          job('test', 'semantic', 'caught'),
+          job('lenient', 'reach', 'survived'),
+          job('lenient', 'semantic', 'survived'),
+          job('slow', 'reach', 'unjudged'),
+        ],
+      },
+    });
+    expect(report.summary).toMatchObject({ judged: 2, caught: 2, survived: 2, unjudged: 1 });
+  });
+});
+
 describe('exitCodeFor', () => {
   const at = (severity: Finding['severity']): Finding[] => [
     { rule: 'weak-gate', severity, message: '' },

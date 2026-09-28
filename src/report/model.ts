@@ -10,6 +10,7 @@ import {
 } from '../core/types';
 import type { ToolId } from '../faults/types';
 import type { FaultRun, GateResult } from '../local/replay';
+import type { RemoteResult } from '../remote/run';
 import type { Gate } from '../resolve/gates';
 import { version } from '../version';
 
@@ -50,6 +51,8 @@ export interface Report {
   failOn: Severity;
   gates: GateReport[];
   findings: Finding[];
+  /** Remote mode: the plan, each job's verdicts, and cleanup notes. */
+  remote?: RemoteResult;
   /** Problems reading the repository that did not stop the run (unparseable workflows). */
   errors: string[];
   summary: {
@@ -222,6 +225,7 @@ export function buildReport(input: {
   errors?: string[];
   cfg: ResolvedConfig;
   failOn?: Severity;
+  remote?: RemoteResult;
 }): Report {
   const findings = [
     ...explain(dynamicFindings(input.results), input.staticFindings),
@@ -231,6 +235,17 @@ export function buildReport(input: {
     .filter((f) => !isIgnored(input.cfg, f))
     .sort(bySeverityDesc);
   const runs = input.results.flatMap((r) => r.runs);
+  // Remote results are per job and tier; a job counts as judged when no tier is left unjudged.
+  const remote = input.remote?.jobs ?? [];
+  const byJob = new Map<string, boolean>();
+  for (const r of remote) {
+    const key = `${r.workflow}#${r.job}`;
+    byJob.set(key, (byJob.get(key) ?? true) && r.verdict !== 'unjudged');
+  }
+  const remoteJobs = {
+    judged: [...byJob.values()].filter(Boolean).length,
+    unjudged: [...byJob.values()].filter((v) => !v).length,
+  };
   const bySeverity: Record<Severity, number> = { high: 0, medium: 0, low: 0, info: 0 };
   for (const f of findings) bySeverity[f.severity]++;
 
@@ -252,16 +267,17 @@ export function buildReport(input: {
     errors: input.errors ?? [],
     summary: {
       gates: input.results.length > 0 ? input.results.length : input.gates.length,
-      judged: input.results.filter((r) => r.status === 'judged').length,
-      caught: runs.filter((r) => r.verdict === 'caught').length,
-      survived: runs.filter((r) => r.verdict === 'survived').length,
+      judged: input.results.filter((r) => r.status === 'judged').length + remoteJobs.judged,
+      caught: [...runs, ...remote].filter((r) => r.verdict === 'caught').length,
+      survived: [...runs, ...remote].filter((r) => r.verdict === 'survived').length,
       deadGates: findings.filter((f) => f.rule === 'dead-gate').length,
       weakGates: findings.filter((f) => f.rule === 'weak-gate').length,
-      unjudged: input.results.filter((r) => r.status !== 'judged').length,
+      unjudged: input.results.filter((r) => r.status !== 'judged').length + remoteJobs.unjudged,
       bySeverity,
     },
   };
   if (input.repository !== undefined) report.repository = input.repository;
+  if (input.remote !== undefined) report.remote = input.remote;
   return report;
 }
 

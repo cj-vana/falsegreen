@@ -6,6 +6,7 @@ import { cleanCommand } from './commands/clean';
 import { FalsegreenError, type IO, type Selection } from './commands/common';
 import { initCommand } from './commands/init';
 import { listCommand } from './commands/list';
+import { remoteCommand } from './commands/remote';
 import { runCommand } from './commands/run';
 import { SEVERITY_ORDER, TIERS, type Severity, type Tier } from './core/types';
 import type { Format } from './report/index';
@@ -177,6 +178,37 @@ export function buildProgram(io: CliIO = defaultIO()): Command {
   withReplay(withReports(withSelection(program.command('local'))))
     .description('replay every gate with planted faults')
     .action(runAs('local'));
+  withReports(withSelection(program.command('remote')))
+    .description(
+      'run the workflows on throwaway branches with planted faults (prints the plan unless --yes)',
+    )
+    .option('--yes', 'push the branches and start the runs; without it only the plan is printed')
+    .option('--pr', 'open draft pull requests for workflows that run only on pull_request')
+    .option('--delete-runs', 'delete the workflow runs afterwards')
+    .option('--keep-branch', 'keep the throwaway branches, for debugging')
+    .option('--timeout <minutes>', 'how long to wait for the runs (default: remote.timeoutMinutes)')
+    .action(
+      (o: RunOpts & { yes?: boolean; pr?: boolean; deleteRuns?: boolean; keepBranch?: boolean }) =>
+        guarded(async () => {
+          const outcome = await remoteCommand(
+            {
+              ...selection(o),
+              yes: o.yes === true,
+              pr: o.pr === true,
+              deleteRuns: o.deleteRuns === true,
+              keepBranch: o.keepBranch === true,
+              ...(o.timeout === undefined ? {} : { timeoutMs: Number(o.timeout) * 60_000 }),
+              ...(o.failOn === undefined ? {} : { failOn: o.failOn }),
+              out: o.out,
+              formats: parseFormats(o.formats),
+              ...(o.tokenEnv === undefined ? {} : { tokenEnv: o.tokenEnv }),
+              ...(o.branch === undefined ? {} : { branch: o.branch }),
+            },
+            io,
+          );
+          return outcome.exitCode;
+        })(),
+    );
   withSelection(program.command('list'))
     .description('print each gate and the faults it would get; plants nothing')
     .action((o: CommonOpts) => guarded(() => listCommand(selection(o), io))());
