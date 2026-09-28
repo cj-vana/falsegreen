@@ -1,0 +1,145 @@
+name: 'falsegreen'
+description: 'Prove your CI gates can fail: plant known faults, run each gate, and report every check that stays green anyway.'
+branding:
+  icon: 'check-circle'
+  color: 'green'
+inputs:
+  mode:
+    description: 'What to run: run (static checks, then every gate replayed with planted faults), static (workflow settings and shell code only), local (replay only) or remote (the real workflows on throwaway branches). Local and run need the toolchains your gates use, set up in the job before this step. Remote needs a token that can push; with the default token it can only dispatch workflows that declare workflow_dispatch.'
+    required: false
+    default: 'run'
+  args:
+    description: 'Extra falsegreen arguments, split like a shell command line: quotes group words, and nothing is globbed. For example: --job test --step "Run npm test" --assume-green. --out and --formats are rejected, because the action writes json, sarif and md to falsegreen-report/, where its outputs and upload look.'
+    required: false
+    default: ''
+  version:
+    description: 'falsegreen npm version or spec to install (latest, 0.1.0, a file: tarball). Empty installs the version in the package.json of the action ref you use, so @v0.1.0 runs 0.1.0.'
+    required: false
+    default: ''
+  node-version:
+    description: 'Node version the action installs with actions/setup-node. It stays on PATH for the rest of the job. An empty string skips setup-node and uses the Node already on PATH.'
+    required: false
+    default: '24'
+  fail-on:
+    description: 'Lowest finding severity that fails the step: high, medium, low or info. Empty uses failOn from falsegreen.config.yml, which defaults to high.'
+    required: false
+    default: ''
+  token:
+    description: 'GitHub token for reading required checks and, in remote mode, for pushing branches and starting runs.'
+    required: false
+    default: ${{ github.token }}
+  upload-report:
+    description: 'Upload falsegreen-report/ as a build artifact.'
+    required: false
+    default: 'true'
+  report-name:
+    description: 'Name of the uploaded artifact. Names must be unique in a workflow run, so give each job its own when the action runs more than once.'
+    required: false
+    default: 'falsegreen-report'
+outputs:
+  exit-code:
+    description: 'falsegreen exit code: 0 nothing at or above fail-on, 1 findings, 2 falsegreen could not finish.'
+    value: ${{ steps.run.outputs.exit-code }}
+  findings:
+    description: 'Number of findings.'
+    value: ${{ steps.run.outputs.findings }}
+  dead-gates:
+    description: 'Number of dead gates: checks that stayed green with a file planted that no parser accepts.'
+    value: ${{ steps.run.outputs.dead-gates }}
+  report-path:
+    description: 'Directory holding results.json, results.sarif and summary.md.'
+    value: ${{ steps.run.outputs.report-path }}
+  sarif-path:
+    description: 'The SARIF file, ready for github/codeql-action/upload-sarif.'
+    value: ${{ steps.run.outputs.sarif-path }}
+runs:
+  using: 'composite'
+  steps:
+    - if: ${{ inputs.node-version != '' }}
+      uses: actions/setup-node@v7
+      with:
+        node-version: ${{ inputs.node-version }}
+    - id: install
+      shell: bash
+      env:
+        FG_VERSION: ${{ inputs.version }}
+      run: |
+        DIR="${RUNNER_TEMP:-/tmp}/falsegreen"
+        mkdir -p "$DIR" && cd "$DIR"
+        npm init -y >/dev/null 2>&1
+        # Empty means the release this copy of the action belongs to, so
+        # cj-vana/falsegreen@v0.1.0 installs falsegreen 0.1.0, not latest.
+        if [ -z "$FG_VERSION" ]; then
+          FG_VERSION=$(node -p "require(process.env.GITHUB_ACTION_PATH + '/package.json').version")
+        fi
+        npm i "falsegreen@${FG_VERSION}" >/dev/null
+        echo "dir=$DIR" >> "$GITHUB_OUTPUT"
+    - id: run
+      shell: bash
+      # Run from the workspace so falsegreen finds the repository, its workflows and its config.
+      # Inputs arrive through env and are never interpolated into the script, because ${{ }}
+      # expands before bash reads the text and a crafted input would run on the runner.
+      working-directory: ${{ github.workspace }}
+      env:
+        FG_DIR: ${{ steps.install.outputs.dir }}
+        FG_MODE: ${{ inputs.mode }}
+        FG_ARGS: ${{ inputs.args }}
+        FG_FAIL_ON: ${{ inputs.fail-on }}
+        FG_TOKEN: ${{ inputs.token }}
+        FG_TOKEN_KIND: ${{ inputs.token == github.token && 'github-token' || 'personal-or-app' }}
+      run: |
+        set +e
+        reject() {
+          echo "::error::$1"
+          echo "exit-code=2" >> "$GITHUB_OUTPUT"
+          exit 2
+        }
+        case "$FG_MODE" in
+          run | static | local | remote) ;;
+          *) reject "Unknown mode '$FG_MODE': use run, static, local or remote." ;;
+        esac
+        # Split args the way a shell would, so quotes group words. xargs does the quote handling,
+        # and the array is only expanded quoted, so nothing is globbed. No mapfile: macOS runners
+        # can have bash 3.2. The blank check matters because GNU xargs runs printf once on
+        # empty input.
+        FG_EXTRA=()
+        if [ -n "${FG_ARGS//[[:space:]]/}" ]; then
+          printf '%s\n' "$FG_ARGS" | xargs -n1 printf '%s\n' > "$FG_DIR/args.txt" ||
+            reject "Could not split the args input; look for an unmatched quote."
+          while IFS= read -r arg; do
+            FG_EXTRA+=("$arg")
+          done < "$FG_DIR/args.txt"
+        fi
+        for arg in "${FG_EXTRA[@]}"; do
+          case "$arg" in
+            --out | --out=* | --formats | --formats=*)
+              reject "Remove $arg from args. The action writes json, sarif and md to falsegreen-report/ in the workspace, where the outputs and the upload look for them; read the location from the report-path output." ;;
+          esac
+        done
+        REPORT="$GITHUB_WORKSPACE/falsegreen-report"
+        FG_OPTS=("$FG_MODE" --out "$REPORT" --formats json,sarif,md)
+        # CLI flags beat the config file, so pass --fail-on only when asked to.
+        if [ -n "$FG_FAIL_ON" ]; then
+          FG_OPTS+=(--fail-on "$FG_FAIL_ON")
+        fi
+        # Choosing remote mode in a workflow is the confirmation the CLI asks for with --yes.
+        if [ "$FG_MODE" = remote ]; then
+          FG_OPTS+=(--yes)
+        fi
+        FALSEGREEN_TOKEN="$FG_TOKEN" FALSEGREEN_TOKEN_KIND="$FG_TOKEN_KIND" \
+          "$FG_DIR/node_modules/.bin/falsegreen" "${FG_OPTS[@]}" "${FG_EXTRA[@]}"
+        CODE=$?
+        echo "exit-code=$CODE" >> "$GITHUB_OUTPUT"
+        echo "report-path=$REPORT" >> "$GITHUB_OUTPUT"
+        echo "sarif-path=$REPORT/results.sarif" >> "$GITHUB_OUTPUT"
+        export REPORT_JSON="$REPORT/results.json"
+        echo "findings=$(node -p "try{require(process.env.REPORT_JSON).findings.length}catch{''}" 2>/dev/null)" >> "$GITHUB_OUTPUT"
+        echo "dead-gates=$(node -p "try{require(process.env.REPORT_JSON).summary.deadGates}catch{''}" 2>/dev/null)" >> "$GITHUB_OUTPUT"
+        exit $CODE
+    - if: ${{ always() && inputs.upload-report == 'true' }}
+      uses: actions/upload-artifact@v7
+      with:
+        name: ${{ inputs.report-name }}
+        path: falsegreen-report/
+        if-no-files-found: ignore
+        retention-days: 14
