@@ -1,7 +1,6 @@
 /** `falsegreen run`, `static` and `local`: find the gates, check them, report. */
 import { isAbsolute, join } from 'node:path';
 
-import { originSlug } from '../core/git';
 import type { Finding, Severity, Tier } from '../core/types';
 import { replayGates, type GateResult, type ProgressEvent } from '../local/replay';
 import { installSignalRevert } from '../plant/planter';
@@ -15,7 +14,7 @@ import type { Gate } from '../resolve/gates';
 import { fetchRequiredChecks, requiredFindings } from '../static/required';
 import { staticFindings } from '../static/rules';
 import type { WorkflowModel } from '../workflow/model';
-import { load, type IO, type Selection } from './common';
+import { load, repositorySlug, type IO, type Selection } from './common';
 
 export interface RunOptions extends Selection {
   command: 'run' | 'static' | 'local';
@@ -44,7 +43,7 @@ async function requiredCheckFindings(
   io: IO,
 ): Promise<Finding[]> {
   if (opts.requiredChecks === 'off') return [];
-  const repo = originSlug(root) ?? io.env.GITHUB_REPOSITORY;
+  const repo = repositorySlug(root, io.env);
   if (repo === undefined) return [];
   let gh = opts.github;
   if (!gh) {
@@ -131,7 +130,7 @@ export async function runCommand(opts: RunOptions, io: IO): Promise<RunOutcome> 
     }
   }
 
-  const repository = originSlug(root);
+  const repository = repositorySlug(root, io.env);
   const report = buildReport({
     root,
     ...(repository === undefined ? {} : { repository }),

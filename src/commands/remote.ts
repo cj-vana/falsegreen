@@ -1,7 +1,6 @@
 /** `falsegreen remote`: run the real workflows on throwaway branches with planted faults. */
 import { isAbsolute, join } from 'node:path';
 
-import { originSlug } from '../core/git';
 import type { Severity } from '../core/types';
 import { createClient, type GitHubClient } from '../remote/github';
 import { remoteFindings, runRemote } from '../remote/run';
@@ -12,7 +11,7 @@ import { buildReport, exitCodeFor } from '../report/model';
 import { renderTerminal } from '../report/terminal';
 import { fetchRequiredChecks, type RequiredChecks } from '../static/required';
 import { staticFindings } from '../static/rules';
-import { FalsegreenError, load, type IO, type Selection } from './common';
+import { FalsegreenError, load, repositorySlug, type IO, type Selection } from './common';
 import type { RunOutcome } from './run';
 
 export interface RemoteCommandOptions extends Selection {
@@ -35,7 +34,7 @@ export interface RemoteCommandOptions extends Selection {
 export async function remoteCommand(opts: RemoteCommandOptions, io: IO): Promise<RunOutcome> {
   const startedAt = new Date();
   const loaded = load(opts, io);
-  const repo = originSlug(loaded.root) ?? io.env.GITHUB_REPOSITORY;
+  const repo = repositorySlug(loaded.root, io.env);
   if (repo === undefined)
     throw new FalsegreenError('remote mode needs a GitHub origin remote (or GITHUB_REPOSITORY)');
 

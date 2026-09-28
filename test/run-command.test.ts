@@ -82,6 +82,23 @@ describe('runCommand required checks', () => {
     }
   });
 
+  it('falls back to GITHUB_REPOSITORY only for the checkout the workflow runs in', async () => {
+    repo = copyFixture('js-vitest');
+    const github = fake({
+      '/repos/o/r': { default_branch: 'main' },
+      '/repos/o/r/branches/main': api('branch-unprotected'),
+      '/repos/o/r/rules/branches/main': api('rules-empty'),
+    });
+    const rulesWith = async (workspace: string) => {
+      const env = { GITHUB_REPOSITORY: 'o/r', GITHUB_WORKSPACE: workspace };
+      const { report } = await runCommand(options(repo!.root, { github }), { ...io, env });
+      return report.findings.map((f) => f.rule);
+    };
+    expect(await rulesWith(repo.root)).toContain('no-required-checks');
+    // falsegreen -C another/repo inside a workflow: that repository's rules are not o/r's.
+    expect(await rulesWith(makeTempDir('workspace'))).not.toContain('no-required-checks');
+  });
+
   it('reports unreadable rules instead of failing the run', async () => {
     repo = copyFixture('js-vitest');
     repo.git('remote', 'add', 'origin', 'https://github.com/o/r.git');

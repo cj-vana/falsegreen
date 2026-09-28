@@ -1,7 +1,10 @@
 /** What every command needs: the repository, its config and workflows, and the gates in them. */
+import { realpathSync } from 'node:fs';
+import { resolve } from 'node:path';
+
 import type { ResolvedConfig } from '../config/load';
 import { loadConfig } from '../config/load';
-import { GitError, repoRoot } from '../core/git';
+import { GitError, originSlug, repoRoot } from '../core/git';
 import { recoverJournal } from '../plant/planter';
 import { resolveAll, type EmptyStep, type Gate } from '../resolve/gates';
 import type { WorkflowModel } from '../workflow/model';
@@ -45,6 +48,27 @@ export function findRoot(cwd: string): string {
     }
     throw err;
   }
+}
+
+function realDir(dir: string): string {
+  try {
+    return realpathSync(dir);
+  } catch {
+    return resolve(dir);
+  }
+}
+
+/**
+ * The repository's `owner/name`: its origin remote, else GITHUB_REPOSITORY. Inside a workflow the
+ * fallback holds only for the checkout the workflow runs in, because `falsegreen -C other/repo`
+ * there analyzes a repository whose rules are not GITHUB_REPOSITORY's.
+ */
+export function repositorySlug(root: string, env: NodeJS.ProcessEnv): string | undefined {
+  const origin = originSlug(root);
+  if (origin !== undefined || env.GITHUB_REPOSITORY === undefined) return origin;
+  const workspace = env.GITHUB_WORKSPACE;
+  if (workspace !== undefined && realDir(workspace) !== realDir(root)) return undefined;
+  return env.GITHUB_REPOSITORY;
 }
 
 /** Restores a tree left behind by an interrupted run before anything else happens. */
