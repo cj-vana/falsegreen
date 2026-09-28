@@ -31,15 +31,31 @@ done
 installed=$(PATH="$FG_TMP/bin:$PATH" cargo nextest --version 2> /dev/null | head -n 1 || true)
 if [ "${installed#"cargo-nextest $NEXTEST_VERSION "}" = "$installed" ]; then
   case "$(uname -s)-$(uname -m)" in
-    Darwin-*) platform=mac ;;
-    Linux-x86_64) platform=linux ;;
-    Linux-aarch64 | Linux-arm64) platform=linux-arm ;;
+    Darwin-*) target=universal-apple-darwin ;;
+    Linux-x86_64) target=x86_64-unknown-linux-gnu ;;
+    Linux-aarch64 | Linux-arm64) target=aarch64-unknown-linux-gnu ;;
     *)
       echo "no prebuilt cargo-nextest for $(uname -s) $(uname -m)" >&2
       exit 1
       ;;
   esac
-  curl -LsSf "https://get.nexte.st/$NEXTEST_VERSION/$platform" | tar zxf - -C "$FG_TMP/bin"
+  # From the GitHub release, checked against the .sha256 published next to it before unpacking.
+  name="cargo-nextest-$NEXTEST_VERSION-$target"
+  base="https://github.com/nextest-rs/nextest/releases/download/cargo-nextest-$NEXTEST_VERSION"
+  downloads="$FG_TMP/cache/downloads"
+  mkdir -p "$downloads"
+  curl -fsSL -o "$downloads/$name.tar.gz" "$base/$name.tar.gz"
+  want=$(curl -fsSL "$base/$name.sha256" | cut -d' ' -f1)
+  if command -v sha256sum > /dev/null; then
+    got=$(sha256sum "$downloads/$name.tar.gz" | cut -d' ' -f1)
+  else
+    got=$(shasum -a 256 "$downloads/$name.tar.gz" | cut -d' ' -f1)
+  fi
+  if [ -z "$want" ] || [ "$got" != "$want" ]; then
+    echo "checksum mismatch for $name.tar.gz: expected ${want:-nothing}, got $got" >&2
+    exit 1
+  fi
+  tar -xzf "$downloads/$name.tar.gz" -C "$FG_TMP/bin"
 fi
 PATH="$FG_TMP/bin:$PATH" cargo nextest --version | head -n 1
 

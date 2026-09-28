@@ -19,6 +19,30 @@ describe('workflow token permissions', () => {
   );
 });
 
+describe('workflow supply chain', () => {
+  const files = ['ci.yml', 'dogfood.yml', 'release.yml'];
+
+  it.each(files)('%s pins every third-party action to a commit', (file) => {
+    const wf = parseWorkflow(`.github/workflows/${file}`, read(file), root);
+    const uses = wf.jobs.flatMap((j) => j.steps.map((s) => s.uses ?? '')).filter(Boolean);
+    const thirdParty = uses.filter((u) => !/^(actions|github)\//.test(u) && !u.startsWith('./'));
+    for (const u of thirdParty) expect(u, u).toMatch(/@[0-9a-f]{40}$/);
+  });
+
+  it.each(files)('%s keeps the token out of .git/config except where a job pushes', (file) => {
+    const wf = parseWorkflow(`.github/workflows/${file}`, read(file), root);
+    for (const job of wf.jobs) {
+      for (const step of job.steps.filter((s) => s.uses?.startsWith('actions/checkout@'))) {
+        // release.yml's release job moves the major tag with git push.
+        const pushes = file === 'release.yml' && job.id === 'release';
+        expect(step.with['persist-credentials'], `${file} ${job.id}`).toBe(
+          pushes ? undefined : 'false',
+        );
+      }
+    }
+  });
+});
+
 describe('release workflow', () => {
   const wf = parseWorkflow('.github/workflows/release.yml', read('release.yml'), root);
   const job = (id: string) => wf.jobs.find((j) => j.id === id)!;
