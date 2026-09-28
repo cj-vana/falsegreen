@@ -398,8 +398,10 @@ function go(argv: string[], ctx: Ctx): ToolInvocation[] | undefined {
   const [exe, sub] = argv;
   switch (exe) {
     case 'go':
-      if (sub === 'test') return simple('go-test', argv, ctx, 2);
-      if (sub === 'vet') return simple('go-vet', argv, ctx, 2);
+    case 'richgo':
+      // richgo passes its arguments to go and only colors the output.
+      if (sub === 'test') return simple('go-test', argv, { ...ctx, exe: 'go' }, 2);
+      if (sub === 'vet') return simple('go-vet', argv, { ...ctx, exe: 'go' }, 2);
       return [];
     case 'gotestsum': {
       const dash = argv.indexOf('--');

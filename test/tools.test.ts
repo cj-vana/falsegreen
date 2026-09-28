@@ -134,6 +134,9 @@ describe('identify: Go', () => {
   it.each([
     ['go test ./...', ['go-test']],
     ['gotestsum -- ./...', ['go-test']],
+    // spf13/cobra's make richtest: richgo takes go's arguments and colors the output.
+    ['richgo test -v ./...', ['go-test']],
+    ['richgo vet ./...', ['go-vet']],
     ['go vet ./...', ['go-vet']],
     ['go build ./...', []],
     ['golangci-lint run', ['golangci-lint']],

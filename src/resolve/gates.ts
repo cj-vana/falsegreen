@@ -44,6 +44,11 @@ export interface ScriptTrace {
    * each, `file` a script run by bash or sh (no -e unless it sets it).
    */
   kind: 'run' | 'package-script' | 'make' | 'file';
+  /**
+   * For a `file`, the shell options it starts with: the interpreter's flags in `sh -e x.sh`, or
+   * the shebang's in `#!/bin/sh -e` when it runs as `./x.sh`.
+   */
+  flags?: string;
   text: string;
   script: ShellScript;
   /** Commands in this script that run a check tool, directly or through another script. */
@@ -266,6 +271,18 @@ function normalizeDir(cwd: string, target: string): string {
   return joined === '.' ? '' : joined;
 }
 
+/** The options a shebang starts its shell with: `-e` in `#!/bin/sh -e`, `-eu` in `#!/usr/bin/env -S bash -eu`. */
+function shebangFlags(text: string): string {
+  if (!text.startsWith('#!')) return '';
+  const words = text.split('\n')[0]!.slice(2).trim().split(/\s+/);
+  let interpreter = words.shift() ?? '';
+  if (posix.basename(interpreter) === 'env') {
+    if (words[0] === '-S') words.shift();
+    interpreter = words.shift() ?? '';
+  }
+  return /^(ba|z|da|k)?sh$/.test(posix.basename(interpreter)) ? words.join(' ') : '';
+}
+
 /** Walks one script level; returns true when any command in it leads to a gate. */
 function walkScript(
   text: string,
@@ -381,15 +398,15 @@ function resolveCommand(
   if (scriptPath !== undefined) {
     const file = normalizeDir(dir, scriptPath);
     if (w.tracked.has(file)) {
-      return walkScript(
-        readFileSync(join(w.root, file), 'utf8'),
-        file,
-        'file',
-        dir,
-        [...via, label],
-        w,
-        depth + 1,
-      );
+      const text = readFileSync(join(w.root, file), 'utf8');
+      const flags =
+        head === scriptPath
+          ? shebangFlags(text)
+          : argv.slice(1, argv.indexOf(scriptPath)).join(' ');
+      const traced = w.traces.length;
+      const found = walkScript(text, file, 'file', dir, [...via, label], w, depth + 1);
+      w.traces[traced]!.flags = flags;
+      return found;
     }
   }
 

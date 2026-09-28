@@ -24,6 +24,13 @@ interface ShellState {
 
 /** Initial -e and pipefail for a trace, or undefined when it is not a POSIX shell script. */
 function initialState(trace: ScriptTrace, shell: string | undefined): ShellState | undefined {
+  if (trace.kind === 'file') {
+    const flags = trace.flags ?? '';
+    return {
+      errexit: /(^|\s)-[a-z]*e[a-z]*(\s|$)|errexit/.test(flags),
+      pipefail: /pipefail/.test(flags),
+    };
+  }
   if (trace.kind !== 'run') return { errexit: false, pipefail: false };
   if (shell === undefined) return { errexit: true, pipefail: false };
   if (shell === 'bash') return { errexit: true, pipefail: true };

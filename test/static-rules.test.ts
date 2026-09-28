@@ -88,6 +88,12 @@ jobs:
         run: pre-commit run --all-files
       - name: lint staged
         run: npx lint-staged
+      - name: shebang -e
+        run: scripts/check
+      - name: shebang ignored
+        run: sh scripts/check
+      - name: interpreter -e
+        run: sh -e scripts/check
   b:
     continue-on-error: \${{ matrix.experimental }}
     strategy:
@@ -118,6 +124,8 @@ beforeAll(() => {
         'test:seq': 'vitest run; echo done',
       },
     }),
+    // httpx's scripts/check: -e comes from the shebang, which only counts when it runs directly.
+    'scripts/check': '#!/bin/sh -e\nruff format src --diff\nmypy src\nruff check src\n',
     '.pre-commit-config.yaml':
       'repos:\n  - repo: local\n    hooks:\n      - id: ruff\n        name: ruff\n        entry: ruff check\n        language: system\n',
   });
@@ -228,6 +236,15 @@ describe('staticFindings', () => {
     expect(forStep('lint staged')).toEqual([
       ['no-files-checked', 'high', lineOf('npx lint-staged')],
     ]);
+  });
+
+  it('takes -e from the shebang of a script run directly, or from the interpreter flags', () => {
+    expect(forStep('shebang -e')).toEqual([]);
+    expect(forStep('shebang ignored').map(([rule]) => rule)).toEqual([
+      'masked-exit',
+      'masked-exit',
+    ]);
+    expect(forStep('interpreter -e')).toEqual([]);
   });
 
   it('reports nothing for a plain gate', () => {
