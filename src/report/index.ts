@@ -10,6 +10,9 @@ export type Format = 'json' | 'sarif' | 'md';
 /** Writes the requested formats into outDir; returns the paths written. */
 export function writeReports(report: Report, outDir: string, formats: Format[]): string[] {
   mkdirSync(outDir, { recursive: true });
+  // The report usually lands inside the repository. Ignoring it keeps git clean and keeps the
+  // next run's `prettier --check .` or clean-tree check from failing on it.
+  writeFileSync(join(outDir, '.gitignore'), '*\n');
   const files: Record<Format, [string, string]> = {
     json: ['results.json', JSON.stringify(report, null, 2)],
     sarif: ['results.sarif', JSON.stringify(toSarif(report), null, 2)],

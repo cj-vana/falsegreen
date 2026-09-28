@@ -10,7 +10,7 @@ import { toSarif } from '../src/report/sarif';
 import { renderTerminal } from '../src/report/terminal';
 import { writeReports } from '../src/report';
 import { fakeGate, fakeResult, fakeRun } from './helpers/gate';
-import { makeTempDir } from './helpers/repo';
+import { makeRepo, makeTempDir } from './helpers/repo';
 
 function sample(): Report {
   const results = [
@@ -126,5 +126,17 @@ describe('writeReports', () => {
     const json = JSON.parse(readFileSync(join(out, 'results.json'), 'utf8')) as Report;
     expect(json.tool).toBe('falsegreen');
     expect(existsSync(join(out, 'results.sarif'))).toBe(true);
+  });
+
+  it('keeps the report out of the next run: git and gitignore-aware tools skip it', () => {
+    // A report under the repository made `prettier --check .` fail on the next run's baseline.
+    const repo = makeRepo({ 'a.txt': 'a\n' });
+    try {
+      writeReports(sample(), join(repo.root, 'falsegreen-report'), ['json', 'md']);
+      expect(readFileSync(join(repo.root, 'falsegreen-report', '.gitignore'), 'utf8')).toBe('*\n');
+      expect(repo.git('status', '--porcelain')).toBe('');
+    } finally {
+      repo.remove();
+    }
   });
 });
