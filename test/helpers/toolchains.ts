@@ -34,6 +34,11 @@ const CACHE_DIRS: Record<string, string> = {
   PRE_COMMIT_HOME: cacheDir('pre-commit'),
   PYRIGHT_PYTHON_CACHE_DIR: cacheDir('pyright'),
   MAVEN_ARGS: `-Dmaven.repo.local=${cacheDir('m2')}`,
+  // black and pylint find their caches through platformdirs, which honors XDG_CACHE_HOME.
+  XDG_CACHE_HOME: cacheDir('xdg'),
+  GOTELEMETRY: 'off',
+  // cargo writes its package cache files here even for crates without dependencies.
+  CARGO_HOME: cacheDir('cargo'),
 };
 for (const [key, value] of Object.entries(CACHE_DIRS)) process.env[key] ??= value;
 
@@ -42,6 +47,8 @@ const PROBES: Record<string, string[]> = {
   make: ['make', '--version'],
   go: ['go', 'version'],
   staticcheck: ['staticcheck', '-version'],
+  // goimports has no version flag; with the empty stdin spawnSync gives it, -l exits 0.
+  goimports: ['goimports', '-l'],
   cargo: ['cargo', '--version'],
   'cargo-clippy': ['cargo', 'clippy', '--version'],
   'cargo-fmt': ['cargo', 'fmt', '--version'],

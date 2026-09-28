@@ -367,7 +367,9 @@ function resolveCommand(
     const hook = argv.slice(2).find((a) => !a.startsWith('-'));
     const tools = precommitTools(w.root, hook);
     if (!argv.includes('--all-files') && !argv.includes('-a')) {
-      w.notes.push(`${label} checks staged files only; planted files are staged for the run`);
+      w.notes.push(
+        `${label} checks staged files only, and a CI checkout has none staged, so it checks nothing; add --all-files`,
+      );
     }
     for (const tool of tools) {
       w.invocations.push({

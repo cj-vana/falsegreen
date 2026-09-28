@@ -48,8 +48,9 @@ export interface ReplayOptions {
   marker?: () => Marker;
 }
 
-// eslint-disable-next-line no-control-regex -- terminal color codes start with ESC (0x1b)
-const ANSI = /\x1b\[[0-9;?]*[A-Za-z]/g;
+// Color codes (ESC [ ... m) and character-set resets (ESC ( B, printed by rustfmt).
+// eslint-disable-next-line no-control-regex -- terminal escape sequences start with ESC (0x1b)
+const ANSI = /\x1b(\[[0-9;?]*[A-Za-z]|[()][A-Za-z0-9])/g;
 const EXCERPT_LINES = 12;
 
 /** Lines around the first mention of the marker, or the tail of the output. */

@@ -5,7 +5,7 @@ import { afterEach, describe, expect, it } from 'vitest';
 
 import { loadConfig } from '../src/config/load';
 import { statusPorcelain } from '../src/core/git';
-import { replayGates, type ProgressEvent, type ReplayOptions } from '../src/local/replay';
+import { excerpt, replayGates, type ProgressEvent, type ReplayOptions } from '../src/local/replay';
 import { resolveAll, type Gate } from '../src/resolve/gates';
 import { loadWorkflows } from '../src/workflow/parse';
 import { makeRepo, type TempRepo } from './helpers/repo';
@@ -48,6 +48,12 @@ async function replay(root: string, gate: Gate, over: Partial<ReplayOptions> = {
   const [result] = await replayGates(root, [gate], loadConfig(root), { ...opts, ...over });
   return result!;
 }
+
+describe('excerpt', () => {
+  it('strips color codes and character-set resets', () => {
+    expect(excerpt('\x1b[31mDiff in\x1b[0m src/a.rs\x1b(B')).toBe('Diff in src/a.rs');
+  });
+});
 
 describe('replayGates', () => {
   it('judges a real gate: both faults caught, output names the planted file, tree clean', async () => {
