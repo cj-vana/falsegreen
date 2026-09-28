@@ -1,0 +1,10 @@
+name: CI
+on: push
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - run: gradle check
+      - run: gradle build -x test
+      - run: gradle compileJava

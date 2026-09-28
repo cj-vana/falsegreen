@@ -179,6 +179,14 @@ describe('identify: JVM', () => {
     expect(one('./gradlew :app:test')!.pathArgs).toEqual(['app']);
   });
 
+  it('recognizes per-format and per-source-set lint checks, but not tasks that write files', () => {
+    expect(tools('gradle spotlessJavaCheck', 'lint')).toEqual(['gradle-lint']);
+    expect(tools('gradle ktlintMainSourceSetCheck detektMain', 'lint')).toEqual(['gradle-lint']);
+    expect(tools('gradle checkstyleTest detektTest', 'lint')).toEqual(['gradle-lint']);
+    expect(tools('gradle spotlessApply', 'lint')).toEqual([]);
+    expect(tools('gradle ktlintFormat detektBaseline', 'lint')).toEqual([]);
+  });
+
   it('maps Maven phases and goals', () => {
     expect(tools('mvn -q test')).toEqual(['maven-test']);
     expect(tools('./mvnw verify')).toEqual(['maven-test', 'maven-lint']);

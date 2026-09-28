@@ -479,6 +479,11 @@ function lintConfigured(root: string, dirs: string[], files: string[]): boolean 
 }
 
 function jvm(argv: string[], ctx: Ctx): ToolInvocation[] | undefined {
+  // Gradle lint tasks, per-format and per-source-set ones included (spotlessJavaCheck,
+  // ktlintMainSourceSetCheck, detektTest), but not those that write files (spotlessApply,
+  // ktlintFormat, detektBaseline). Tested before the test branch: checkstyleTest ends in `Test`.
+  const lintTask =
+    /^(spotless\w*Check|ktlint\w*Check|detekt(Main|Test)?|checkstyle\w*|pmd\w*|spotbugs\w*|lint)$/;
   const exe = argv[0];
   const gradle = exe === 'gradle' || exe === 'gradlew';
   const maven = exe === 'mvn' || exe === 'mvnw';
@@ -499,11 +504,8 @@ function jvm(argv: string[], ctx: Ctx): ToolInvocation[] | undefined {
       if (name === 'check' || name === 'build') {
         cats.add('test');
         wantsLintIfConfigured = true;
-      } else if (name === 'test' || /Test$/.test(name)) cats.add('test');
-      else if (
-        /^(spotlessCheck|ktlintCheck|detekt|checkstyle\w*|pmd\w*|spotbugs\w*|lint)$/.test(name)
-      )
-        cats.add('lint');
+      } else if (lintTask.test(name)) cats.add('lint');
+      else if (name === 'test' || /Test$/.test(name)) cats.add('test');
       else if (/^(compile\w*|classes|assemble|jar)$/.test(name)) cats.add('compile');
     }
   } else {

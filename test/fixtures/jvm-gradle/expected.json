@@ -1,0 +1,11 @@
+{
+  "requires": ["java", "gradle"],
+  "gates": [
+    { "job": "build", "step": "Run gradle check", "tool": "gradle-test", "reach": "caught", "semantic": "caught" },
+    { "job": "build", "step": "Run gradle check", "tool": "gradle-lint", "reach": "caught", "semantic": "caught" },
+    { "job": "build", "step": "Run gradle build -x test", "tool": "gradle-test", "reach": "caught", "semantic": "survived" },
+    { "job": "build", "step": "Run gradle build -x test", "tool": "gradle-lint", "reach": "caught", "semantic": "caught" },
+    { "job": "build", "step": "Run gradle compileJava", "tool": "gradle-compile", "reach": "caught", "semantic": "unjudged" }
+  ],
+  "static": []
+}
