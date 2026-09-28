@@ -128,12 +128,24 @@ export function dynamicFindings(results: GateResult[]): Finding[] {
         continue;
       }
       if (semantic?.verdict === 'survived') {
-        const f: Finding = {
-          rule: 'weak-gate',
-          severity: 'medium',
-          message: `${step} fails on a file that does not parse, but stayed green with a ${semantic.fault?.description ?? 'planted problem'}: ${tool} runs, but does not fail on real problems.`,
-          ...where(g),
-        };
+        const problem = semantic.fault?.description ?? 'planted problem';
+        // Only a caught reach fault shows the tool reads that location; without one this may be a
+        // dead gate, so it is not graded down to medium.
+        const f: Finding =
+          reach?.verdict === 'caught'
+            ? {
+                rule: 'weak-gate',
+                severity: 'medium',
+                message: `${step} fails on a file that does not parse, but stayed green with a ${problem}: ${tool} runs, but does not fail on real problems.`,
+                ...where(g),
+              }
+            : {
+                rule: 'weak-gate',
+                severity: 'high',
+                message: `${step} stayed green with a ${problem}, and its reach fault was ${reach === undefined ? 'not run' : 'not judged'}, so ${tool} may not read that location at all.`,
+                hint: 'Run with --tier both to tell a dead gate from a weak one.',
+                ...where(g),
+              };
         if (semantic.fault?.expectSurvival !== undefined) f.hint = semantic.fault.expectSurvival;
         findings.push(f);
       }
@@ -220,6 +232,25 @@ function explain(dynamic: Finding[], found: Finding[]): Finding[] {
   });
 }
 
+/**
+ * A replay that tried gates and got no verdict at all proves nothing, and must not pass as if it
+ * had: the `falsegreen init` workflow without the project's toolchains is the usual cause.
+ */
+function nothingJudged(tried: number, verdicts: { verdict: string }[]): Finding[] {
+  const decided = verdicts.filter((v) =>
+    ['caught', 'survived', 'unattributed'].includes(v.verdict),
+  );
+  if (tried === 0 || decided.length > 0) return [];
+  return [
+    {
+      rule: 'unjudged',
+      severity: 'high',
+      message: `No fault got a verdict in the ${tried} ${tried === 1 ? 'gate' : 'gates'} falsegreen tried, so this run proves nothing about them.`,
+      hint: 'The other findings say why. Set up the toolchains and dependencies your checks need before falsegreen runs, or judge them with falsegreen remote.',
+    },
+  ];
+}
+
 const bySeverityDesc = (a: Finding, b: Finding): number =>
   SEVERITY_ORDER.indexOf(b.severity) - SEVERITY_ORDER.indexOf(a.severity);
 
@@ -237,16 +268,20 @@ export function buildReport(input: {
   failOn?: Severity;
   remote?: RemoteResult;
 }): Report {
+  const runs = input.results.flatMap((r) => r.runs);
+  // Remote results are per job and tier; a job counts as judged when no tier is left unjudged.
+  const remote = input.remote?.jobs ?? [];
   const findings = [
     ...explain(dynamicFindings(input.results), input.staticFindings),
     ...input.staticFindings,
     ...(input.extraFindings ?? []),
+    ...nothingJudged(input.results.length + new Set(remote.map((r) => r.job)).size, [
+      ...runs,
+      ...remote,
+    ]),
   ]
     .filter((f) => !isIgnored(input.cfg, f))
     .sort(bySeverityDesc);
-  const runs = input.results.flatMap((r) => r.runs);
-  // Remote results are per job and tier; a job counts as judged when no tier is left unjudged.
-  const remote = input.remote?.jobs ?? [];
   const byJob = new Map<string, boolean>();
   for (const r of remote) {
     const key = `${r.workflow}#${r.job}`;

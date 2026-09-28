@@ -1,5 +1,5 @@
 /** falsegreen command-line interface. */
-import { Command, Option } from 'commander';
+import { Command, InvalidArgumentError, Option } from 'commander';
 import pc from 'picocolors';
 
 import { cleanCommand } from './commands/clean';
@@ -110,8 +110,18 @@ function withReplay(cmd: Command): Command {
     .option(
       '--timeout <minutes>',
       'per-run timeout in minutes, unless the step sets timeout-minutes',
-      '15',
+      minutes,
+      15,
     );
+}
+
+/** A positive number of minutes; anything else stops the command before it runs. */
+function minutes(value: string): number {
+  const n = Number(value);
+  if (!Number.isFinite(n) || n <= 0) {
+    throw new InvalidArgumentError('--timeout must be a positive number of minutes.');
+  }
+  return n;
 }
 
 interface RunOpts extends CommonOpts {
@@ -124,7 +134,7 @@ interface RunOpts extends CommonOpts {
   tokenEnv?: string;
   tier?: 'reach' | 'semantic' | 'both';
   assumeGreen?: boolean;
-  timeout?: string;
+  timeout?: number;
 }
 
 function parseFormats(list: string): Format[] {
@@ -165,7 +175,7 @@ export function buildProgram(io: CliIO = defaultIO()): Command {
           command,
           tiers,
           assumeGreen: o.assumeGreen === true,
-          timeoutMs: Number(o.timeout ?? '15') * 60_000,
+          timeoutMs: (o.timeout ?? 15) * 60_000,
           ...(o.failOn === undefined ? {} : { failOn: o.failOn }),
           out: o.out,
           formats: parseFormats(o.formats),
@@ -196,7 +206,11 @@ export function buildProgram(io: CliIO = defaultIO()): Command {
     .option('--pr', 'open draft pull requests for workflows that run only on pull_request')
     .option('--delete-runs', 'delete the workflow runs afterwards')
     .option('--keep-branch', 'keep the throwaway branches, for debugging')
-    .option('--timeout <minutes>', 'how long to wait for the runs (default: remote.timeoutMinutes)')
+    .option(
+      '--timeout <minutes>',
+      'how long to wait for the runs (default: remote.timeoutMinutes)',
+      minutes,
+    )
     .action(
       (o: RunOpts & { yes?: boolean; pr?: boolean; deleteRuns?: boolean; keepBranch?: boolean }) =>
         guarded(async () => {
@@ -207,7 +221,7 @@ export function buildProgram(io: CliIO = defaultIO()): Command {
               pr: o.pr === true,
               deleteRuns: o.deleteRuns === true,
               keepBranch: o.keepBranch === true,
-              ...(o.timeout === undefined ? {} : { timeoutMs: Number(o.timeout) * 60_000 }),
+              ...(o.timeout === undefined ? {} : { timeoutMs: o.timeout * 60_000 }),
               ...(o.failOn === undefined ? {} : { failOn: o.failOn }),
               out: o.out,
               formats: parseFormats(o.formats),

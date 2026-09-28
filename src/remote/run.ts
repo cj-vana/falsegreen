@@ -379,12 +379,21 @@ export function remoteFindings(
         ...where,
       });
     } else if (semantic?.verdict === 'survived') {
-      findings.push({
-        rule: 'weak-gate',
-        severity: 'medium',
-        message: `Job \`${job}\` fails on files that do not parse, but stayed green with real problems planted${at}.`,
-        ...where,
-      });
+      findings.push(
+        reach?.verdict === 'caught'
+          ? {
+              rule: 'weak-gate',
+              severity: 'medium',
+              message: `Job \`${job}\` fails on files that do not parse, but stayed green with real problems planted${at}.`,
+              ...where,
+            }
+          : {
+              rule: 'weak-gate',
+              severity: 'high',
+              message: `Job \`${job}\` stayed green with real problems planted, and its reach run was not judged, so it may not check those files at all${at}.`,
+              ...where,
+            },
+      );
     }
     if (results.some((r) => r.verdict === 'survived') && requiredNames.has(job)) {
       findings.push({

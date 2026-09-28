@@ -82,6 +82,18 @@ describe('cli basics', () => {
     expect(r.code).toBe(1);
   });
 
+  it.each([
+    ['run', 'abc'],
+    ['local', '0'],
+    ['remote', '-5'],
+  ])('%s rejects --timeout %s', async (command, value) => {
+    // "abc" used to become NaN, and every run then "timed out after NaN s".
+    // -C an empty directory: were the value accepted, nothing here could be replayed.
+    const r = await cli([command, '-C', makeTempDir('timeout'), '--timeout', value]);
+    expect(r.err).toContain('--timeout must be a positive number of minutes');
+    expect(r.code).not.toBe(0);
+  });
+
   it('accepts the required-check options and rejects a bad mode', async () => {
     repo = copyFixture('js-vitest');
     const out = join(makeTempDir('report'), 'r');

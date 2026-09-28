@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 
 import type { ResolvedConfig } from '../src/config/load';
 import type { Finding } from '../src/core/types';
-import { buildReport, dynamicFindings, exitCodeFor } from '../src/report/model';
+import { buildReport, dynamicFindings, exitCodeFor, type Report } from '../src/report/model';
 import { fakeGate, fakeResult, fakeRun } from './helpers/gate';
 
 const cfg: ResolvedConfig = {
@@ -42,6 +42,24 @@ describe('dynamicFindings', () => {
     ]);
     expect(rules(f)).toEqual([['weak-gate', 'medium']]);
     expect(f[0]!.hint).toBe('oxlint exits 0 on warnings.');
+  });
+
+  it('does not call a gate weak unless its reach fault was caught', () => {
+    // --tier semantic: nothing shows the tool reads that location, so this may be a dead gate.
+    const notRun = dynamicFindings([fakeResult([fakeRun('semantic', 'survived')])]);
+    expect(rules(notRun)).toEqual([['weak-gate', 'high']]);
+    expect(notRun[0]!.message).toContain('its reach fault was not run');
+    const unjudged = dynamicFindings([
+      fakeResult([
+        fakeRun('reach', 'unjudged', { reason: 'timed out after 900 s' }),
+        fakeRun('semantic', 'survived'),
+      ]),
+    ]);
+    expect(rules(unjudged)).toEqual([
+      ['weak-gate', 'high'],
+      ['unjudged', 'info'],
+    ]);
+    expect(unjudged[0]!.message).toContain('its reach fault was not judged');
   });
 
   it('reports unattributed failures as low', () => {
@@ -221,6 +239,39 @@ describe('remote summary', () => {
       },
     });
     expect(report.summary).toMatchObject({ judged: 2, caught: 2, survived: 2, unjudged: 1 });
+  });
+});
+
+describe('a run that judges nothing', () => {
+  const build = (results: ReturnType<typeof fakeResult>[], modes: Report['modes']) =>
+    buildReport({
+      root: '/repo',
+      modes,
+      startedAt: new Date(),
+      gates: results.length > 0 ? results.map((r) => r.gate) : [fakeGate()],
+      results,
+      staticFindings: [],
+      cfg,
+    });
+
+  it('fails when gates were replayed but no fault got a verdict', () => {
+    // The falsegreen init workflow with no toolchains set up: every gate is already red.
+    const report = build(
+      [fakeResult([], { status: 'already-red', reason: 'the step exits 127 without any fault' })],
+      ['static', 'local'],
+    );
+    const f = report.findings.find((x) => x.severity === 'high')!;
+    expect(f.rule).toBe('unjudged');
+    expect(f.message).toBe(
+      'No fault got a verdict in the 1 gate falsegreen tried, so this run proves nothing about them.',
+    );
+    expect(exitCodeFor(report.findings, 'high')).toBe(1);
+  });
+
+  it('stays quiet when a fault got a verdict, and in static mode', () => {
+    const judged = build([fakeResult([fakeRun('reach', 'caught')])], ['static', 'local']);
+    expect(judged.findings).toEqual([]);
+    expect(build([], ['static']).findings).toEqual([]);
   });
 });
 

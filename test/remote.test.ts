@@ -107,6 +107,26 @@ describe('runRemote', () => {
     ).toEqual([['dead-gate', 'high', 'lenient']]);
   });
 
+  it('does not call a job weak when its reach run was not judged', async () => {
+    const { loaded, sha } = setup();
+    const { client } = fake(sha);
+    const result = await runRemote(loaded, client, 'o/r', options(), quiet);
+    const job = (tier: 'reach' | 'semantic', verdict: 'survived' | 'unjudged') => ({
+      workflow: '.github/workflows/ci.yml',
+      job: 'lenient',
+      tier,
+      conclusion: null,
+      verdict,
+    });
+    const findings = remoteFindings(
+      { ...result, jobs: [job('reach', 'unjudged'), job('semantic', 'survived')] },
+      loaded.workflows,
+    );
+    const weak = findings.find((f) => f.rule === 'weak-gate')!;
+    expect(weak.severity).toBe('high');
+    expect(weak.message).toContain('its reach run was not judged');
+  });
+
   it('dispatches the workflow when the token is the workflow token, whose pushes start nothing', async () => {
     const { loaded, sha } = setup();
     const { client, state } = fake(sha, { pushStarts: [] });
