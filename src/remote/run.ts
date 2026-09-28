@@ -164,6 +164,35 @@ export async function runRemote(
   const shas = new Map<Tier, string>();
   result.ran = true;
   let failure: unknown;
+  // Cleanup runs once, from the normal path or from a signal, whichever comes first.
+  let cleaning: Promise<Cleanup> | undefined;
+  const cleanupOnce = (): Promise<Cleanup> =>
+    (cleaning ??= cleanup(
+      gh,
+      repo,
+      {
+        runs: [...started.values()],
+        shas: [...shas.values()],
+        pulls: [...pulls.values()],
+        branches: created,
+      },
+      opts,
+    ));
+  // Ctrl-C or a cancelled job must not leave branches with planted faults behind.
+  const offs = (Object.keys(SIGNAL_EXIT) as (keyof typeof SIGNAL_EXIT)[]).map((signal) => {
+    const handler = (): void => {
+      io.err(`${signal}: deleting the throwaway branches and cancelling the runs\n`);
+      const deadline = new Promise<void>((resolve) => setTimeout(resolve, INTERRUPT_CLEANUP_MS));
+      void Promise.race([cleanupOnce().then(report), deadline]).finally(() =>
+        process.exit(SIGNAL_EXIT[signal]),
+      );
+    };
+    process.on(signal, handler);
+    return () => process.off(signal, handler);
+  });
+  const report = (c: Cleanup): void => {
+    for (const line of [...c.notes, ...c.left]) io.err(`${line}\n`);
+  };
   try {
     for (const tier of TIERS) {
       const { files, dropped } = mergeFaults(loaded.root, baseSha, perTier.get(tier)!.faults);
@@ -259,11 +288,24 @@ export async function runRemote(
           }
           continue;
         }
-        const { data } = await gh.request<{ jobs: Job[] }>(
-          'GET',
+        const jobs = await gh.paginate<Job>(
           `/repos/${repo}/actions/runs/${run.id}/jobs?filter=latest&per_page=100`,
+          'jobs',
         );
-        for (const job of data.jobs.filter((j) => names.includes(j.name))) {
+        // A gate job the run never reported (a renamed job, a matrix value) is not judged.
+        for (const job of names.filter((n) => !jobs.some((j) => j.name === n))) {
+          result.jobs.push({
+            workflow: wf.file,
+            job,
+            tier,
+            runId: run.id,
+            runUrl: run.html_url,
+            conclusion: null,
+            verdict: 'unjudged',
+            reason: 'no job with this name ran; check the job name and its matrix values',
+          });
+        }
+        for (const job of jobs.filter((j) => names.includes(j.name))) {
           let verdict: RemoteJobResult['verdict'];
           if (job.conclusion === 'success') verdict = 'survived';
           else if (job.conclusion === 'skipped') verdict = 'skipped';
@@ -290,61 +332,112 @@ export async function runRemote(
     }
   } catch (err) {
     failure = err;
-  } finally {
-    notes.push(
-      ...(await cleanup(gh, repo, [...started.values()], [...pulls.values()], created, opts)),
-    );
   }
-  if (failure !== undefined) throw failure;
+  const done = await cleanupOnce();
+  offs.forEach((off) => off());
+  notes.push(...done.notes);
+  if (failure !== undefined) {
+    // The first failure is what the user needs; what cleanup left behind goes to stderr.
+    for (const line of done.left) io.err(`${line}\n`);
+    throw failure;
+  }
+  if (done.left.length > 0) {
+    throw new FalsegreenError(`cleanup did not finish: ${done.left.join('; ')}`);
+  }
   return result;
 }
 
-/** Cancels unfinished runs, closes pull requests, deletes and verifies the branches. */
+interface Cleanup {
+  /** What was done or could not be done, for the report. */
+  notes: string[];
+  /** What is left on the repository: open pull requests, branches that still exist. */
+  left: string[];
+}
+
+/**
+ * Cancels unfinished runs, closes pull requests, deletes and verifies the branches, and with
+ * --delete-runs deletes the runs. Every step is tried whatever happened to the one before, and
+ * runs are found by the planted commits, so a run nobody waited for is cancelled too.
+ */
 async function cleanup(
   gh: GitHubClient,
   repo: string,
-  runs: Run[],
-  pulls: number[],
-  branches: string[],
+  state: { runs: Run[]; shas: string[]; pulls: number[]; branches: string[] },
   opts: RemoteOptions,
-): Promise<string[]> {
-  const notes: string[] = [];
-  for (const run of runs.filter((r) => r.status !== 'completed')) {
+): Promise<Cleanup> {
+  const out: Cleanup = { notes: [], left: [] };
+  const attempt = async (what: string, action: () => Promise<unknown>): Promise<boolean> => {
+    try {
+      await action();
+      return true;
+    } catch (err) {
+      out.left.push(`could not ${what}: ${(err as Error).message}`);
+      return false;
+    }
+  };
+
+  const runs = new Map(state.runs.map((r) => [r.id, r]));
+  for (const sha of state.shas) {
+    await attempt(`list the runs of ${sha.slice(0, 7)}`, async () => {
+      const { data } = await gh.request<{ workflow_runs: Run[] }>(
+        'GET',
+        `/repos/${repo}/actions/runs?head_sha=${sha}&per_page=100`,
+      );
+      for (const run of data.workflow_runs) runs.set(run.id, run);
+    });
+  }
+  for (const run of [...runs.values()].filter((r) => r.status !== 'completed')) {
     try {
       await gh.request('POST', `/repos/${repo}/actions/runs/${run.id}/cancel`);
     } catch (err) {
-      notes.push(`could not cancel run ${run.id}: ${(err as Error).message}`);
+      out.notes.push(`could not cancel run ${run.id}: ${(err as Error).message}`);
     }
   }
-  for (const number of pulls) {
-    await gh.request('PATCH', `/repos/${repo}/pulls/${number}`, { state: 'closed' });
+  for (const number of state.pulls) {
+    await attempt(`close pull request #${number}`, () =>
+      gh.request('PATCH', `/repos/${repo}/pulls/${number}`, { state: 'closed' }),
+    );
   }
   if (opts.keepBranch) {
-    notes.push(`kept ${branches.join(' and ')} (--keep-branch); delete them when you are done`);
+    out.notes.push(
+      `kept ${state.branches.join(' and ')} (--keep-branch); delete them when you are done`,
+    );
   } else {
-    for (const branch of branches) {
-      await gh.request('DELETE', `/repos/${repo}/git/refs/heads/${branch}`);
+    for (const branch of state.branches) {
+      const deleted = await attempt(`delete ${branch}`, () =>
+        gh.request('DELETE', `/repos/${repo}/git/refs/heads/${branch}`),
+      );
+      if (!deleted) continue;
       try {
         await gh.request('GET', `/repos/${repo}/git/ref/heads/${branch}`);
-        throw new FalsegreenError(
-          `${branch} still exists on ${repo} after deleting it; delete it by hand`,
-        );
+        out.left.push(`${branch} still exists on ${repo} after deleting it; delete it by hand`);
       } catch (err) {
-        if (!(err instanceof GitHubError && err.status === 404)) throw err;
+        if (!(err instanceof GitHubError && err.status === 404)) {
+          out.notes.push(`could not check that ${branch} is gone: ${(err as Error).message}`);
+        }
       }
     }
   }
   if (opts.deleteRuns) {
-    for (const run of runs) {
+    for (const run of runs.values()) {
       try {
         await gh.request('DELETE', `/repos/${repo}/actions/runs/${run.id}`);
       } catch (err) {
-        notes.push(`could not delete run ${run.id}: ${(err as Error).message}`);
+        out.notes.push(`could not delete run ${run.id}: ${(err as Error).message}`);
       }
     }
   }
-  return notes;
+  return out;
 }
+
+const SIGNAL_EXIT: Record<'SIGINT' | 'SIGTERM' | 'SIGHUP', number> = {
+  SIGINT: 130,
+  SIGTERM: 143,
+  SIGHUP: 129,
+};
+
+/** How long an interrupted run spends cleaning up before it exits anyway. */
+const INTERRUPT_CLEANUP_MS = 60_000;
 
 /** Findings from a remote run: jobs that stayed green, were skipped, or could not be judged. */
 export function remoteFindings(

@@ -1,7 +1,7 @@
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import { load } from '../src/commands/common';
 import { headSha } from '../src/core/git';
@@ -272,6 +272,82 @@ describe('runRemote', () => {
     const { client, state } = fake(sha, { failures: { '/repos/o/r/actions/runs/': 500 } });
     await expect(runRemote(loaded, client, 'o/r', options(), quiet)).rejects.toThrow(/HTTP 500/);
     expect([...state.refs.keys()]).toEqual([]);
+  });
+
+  it('tries every cleanup step even when one fails, and says what is left', async () => {
+    const pr = 'on: pull_request\njobs:\n  test:\n    steps:\n      - run: node --test\n';
+    const { loaded, sha } = setup({ '.github/workflows/pr.yml': pr });
+    const { client, state } = fake(sha, {
+      failures: {
+        '/repos/o/r/pulls/1': 502,
+        '/repos/o/r/git/refs/heads/falsegreen/run1-reach': 500,
+      },
+    });
+    await expect(runRemote(loaded, client, 'o/r', options({ pr: true }), quiet)).rejects.toThrow(
+      /cleanup did not finish: could not close pull request #1: .*HTTP 502; could not delete falsegreen\/run1-reach: .*HTTP 500/,
+    );
+    // The semantic branch and its pull request are gone all the same.
+    expect([...state.refs.keys()]).toEqual(['falsegreen/run1-reach']);
+    expect(state.pulls.find((p) => p.number === 2)?.state).toBe('closed');
+  });
+
+  it('cancels runs the push started that it never waited for', async () => {
+    const docs = 'on: push\njobs:\n  docs:\n    steps:\n      - run: echo building docs\n';
+    const { loaded, sha } = setup({ '.github/workflows/docs.yml': docs });
+    const { client, state } = fake(sha, {
+      pushStarts: ['.github/workflows/ci.yml', '.github/workflows/docs.yml'],
+      pollsToComplete: Number.POSITIVE_INFINITY,
+    });
+    await runRemote(loaded, client, 'o/r', options({ timeoutMs: 30 }), quiet);
+    const docsRuns = state.runs.filter((r) => r.path.endsWith('docs.yml')).map((r) => r.id);
+    expect(docsRuns).toHaveLength(2);
+    expect(state.cancelled).toEqual(expect.arrayContaining(docsRuns));
+  });
+
+  it('reports a gate job that no run reported as unjudged, instead of dropping it', async () => {
+    const { loaded, sha } = setup();
+    const { client } = fake(sha, { conclusions: { test: 'failure' } });
+    const result = await runRemote(loaded, client, 'o/r', options(), quiet);
+    const lenient = result.jobs.filter((j) => j.job === 'lenient');
+    expect(lenient.map((j) => [j.tier, j.verdict, j.reason])).toEqual([
+      ['reach', 'unjudged', 'no job with this name ran; check the job name and its matrix values'],
+      [
+        'semantic',
+        'unjudged',
+        'no job with this name ran; check the job name and its matrix values',
+      ],
+    ]);
+  });
+
+  it('cleans up when interrupted, before it exits', async () => {
+    const { loaded, sha } = setup();
+    const { client, state } = fake(sha, { pollsToComplete: Number.POSITIVE_INFINITY });
+    let exitCode: number | undefined;
+    const exit = vi.spyOn(process, 'exit').mockImplementation(((code?: number) => {
+      exitCode = code;
+    }) as never);
+    try {
+      const running = runRemote(
+        loaded,
+        client,
+        'o/r',
+        options({ timeoutMs: 3_000, pollMs: 20 }),
+        quiet,
+      );
+      const until = async (done: () => boolean) => {
+        const deadline = Date.now() + 10_000;
+        while (!done() && Date.now() < deadline) await new Promise((r) => setTimeout(r, 10));
+      };
+      await until(() => state.refs.size === 2);
+      process.emit('SIGINT');
+      await until(() => exitCode !== undefined);
+      expect(exitCode).toBe(130);
+      expect([...state.refs.keys()]).toEqual([]);
+      expect(state.cancelled.length).toBeGreaterThan(0);
+      await running.catch(() => undefined);
+    } finally {
+      exit.mockRestore();
+    }
   });
 
   it('cancels runs that do not finish in time and leaves them unjudged', async () => {

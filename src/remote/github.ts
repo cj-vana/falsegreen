@@ -22,7 +22,8 @@ export interface GitHubResponse<T> {
 
 export interface GitHubClient {
   request<T>(method: string, path: string, body?: unknown): Promise<GitHubResponse<T>>;
-  paginate<T>(path: string): Promise<T[]>;
+  /** Every page of a list; `key` names the array when the API wraps it (`{ jobs: [...] }`). */
+  paginate<T>(path: string, key?: string): Promise<T[]>;
 }
 
 type Fetch = (url: string, init?: RequestInit) => Promise<Response>;
@@ -68,12 +69,16 @@ export function createClient(
 
   return {
     request: (method, path, body) => call(method, `${base}${path}`, body),
-    async paginate<T>(path: string) {
+    async paginate<T>(path: string, key?: string) {
       const items: T[] = [];
       let url: string | undefined = `${base}${path}`;
       for (let page = 0; url !== undefined && page < 100; page++) {
-        const res: GitHubResponse<T[]> = await call<T[]>('GET', url);
-        items.push(...res.data);
+        const res: GitHubResponse<T[] | Record<string, T[]>> = await call('GET', url);
+        items.push(
+          ...(key === undefined
+            ? (res.data as T[])
+            : ((res.data as Record<string, T[]>)[key] ?? [])),
+        );
         url = nextLink(res.headers);
       }
       return items;

@@ -185,6 +185,22 @@ describe('createClient', () => {
     expect(seen[0]!.headers.get('user-agent')).toMatch(/^falsegreen\//);
   });
 
+  it('pages through lists the API wraps in an object, such as a run jobs', async () => {
+    const json = { 'content-type': 'application/json' };
+    const pages = [
+      new Response(JSON.stringify({ total_count: 3, jobs: [{ id: 1 }, { id: 2 }] }), {
+        headers: { ...json, link: '<https://api.example/jobs?page=2>; rel="next"' },
+      }),
+      new Response(JSON.stringify({ total_count: 3, jobs: [{ id: 3 }] }), { headers: json }),
+    ];
+    const gh = createClient('tok', 'https://api.example', async () => pages.shift()!);
+    expect(await gh.paginate<{ id: number }>('/jobs', 'jobs')).toEqual([
+      { id: 1 },
+      { id: 2 },
+      { id: 3 },
+    ]);
+  });
+
   it('uses the current API version on github.com', async () => {
     let version: string | null = null;
     const gh = createClient('tok', undefined, async (_url, init) => {

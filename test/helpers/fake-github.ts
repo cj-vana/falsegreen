@@ -324,8 +324,9 @@ export function fakeGitHub(opts: FakeOptions): { client: GitHubClient; state: Fa
       }
       throw new GitHubError(404, `${method} ${path}: no fake route`);
     },
-    async paginate<T>(path: string) {
-      return (await client.request<T[]>('GET', path)).data;
+    async paginate<T>(path: string, key?: string) {
+      const { data } = await client.request<T[] | Record<string, T[]>>('GET', path);
+      return key === undefined ? (data as T[]) : (data as Record<string, T[]>)[key]!;
     },
   };
   return { client, state };
