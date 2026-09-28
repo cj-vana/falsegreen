@@ -1,0 +1,9 @@
+{
+  "requires": ["java", "gradle"],
+  "gates": [
+    { "job": "test", "step": "Run gradle test", "tool": "gradle-test", "reach": "caught", "semantic": "caught" },
+    { "job": "test", "step": "Run gradle build -x test", "tool": "gradle-test", "reach": "survived", "semantic": "survived" },
+    { "job": "test", "step": "Run gradle assemble", "tool": "gradle-compile", "reach": "caught", "semantic": "unjudged" }
+  ],
+  "static": []
+}
