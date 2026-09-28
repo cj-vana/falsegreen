@@ -46,6 +46,8 @@ export interface ReplayOptions {
   timeoutMs: number;
   onProgress?: (e: ProgressEvent) => void;
   marker?: () => Marker;
+  /** Host variables to keep from the step, on top of the ones named like credentials. */
+  stripEnv?: string[];
 }
 
 // Color codes (ESC [ ... m) and character-set resets (ESC ( B, printed by rustfmt).
@@ -54,8 +56,15 @@ const ANSI = /\x1b(\[[0-9;?]*[A-Za-z]|[()][A-Za-z0-9])/g;
 const EXCERPT_LINES = 12;
 
 /** Lines around the first mention of the marker, or the tail of the output. */
+/**
+ * Token shapes that must not reach a report, which the action uploads as an artifact: GitHub
+ * tokens (ghp_, gho_, ghu_, ghs_, ghr_, github_pat_), npm tokens, Slack tokens, AWS key ids.
+ */
+const TOKEN =
+  /\b(gh[pousr]_[A-Za-z0-9]{20,}|github_pat_[A-Za-z0-9_]{20,}|npm_[A-Za-z0-9]{30,}|xox[abprs]-[A-Za-z0-9-]{10,}|AKIA[0-9A-Z]{16})\b/g;
+
 export function excerpt(output: string, marker?: Marker): string {
-  const lines = output.replace(ANSI, '').split('\n');
+  const lines = output.replace(ANSI, '').replace(TOKEN, '[redacted]').split('\n');
   const hit = marker ? lines.findIndex((l) => outputMentions(l, marker)) : -1;
   const slice =
     hit >= 0
@@ -128,11 +137,12 @@ async function replayGate(
   const refused = refusal(gate);
   if (refused) return { gate, status: 'unjudged', reason: refused, runs: [] };
   const timeoutMs = stepTimeout(gate, opts.timeoutMs);
+  const step = { timeoutMs, ...(opts.stripEnv ? { stripEnv: opts.stripEnv } : {}) };
   const dirtyBefore = new Set(modifiedTracked(root));
   const result: GateResult = { gate, status: 'judged', runs: [] };
 
   if (!opts.assumeGreen) {
-    const base = await runStep(root, gate, { timeoutMs });
+    const base = await runStep(root, gate, step);
     opts.onProgress?.({ type: 'baseline', gate, result: base });
     result.baseline = {
       exitCode: base.exitCode,
@@ -181,7 +191,7 @@ async function replayGate(
       const planted = plant(root, fault);
       let r: ProcResult;
       try {
-        r = await runStep(root, gate, { timeoutMs });
+        r = await runStep(root, gate, step);
       } finally {
         planted.revert();
       }

@@ -53,6 +53,20 @@ describe('excerpt', () => {
   it('strips color codes and character-set resets', () => {
     expect(excerpt('\x1b[31mDiff in\x1b[0m src/a.rs\x1b(B')).toBe('Diff in src/a.rs');
   });
+
+  it('redacts token-shaped strings, since excerpts are uploaded with the report', () => {
+    const tokens = [
+      'ghp_' + 'a'.repeat(36),
+      'gho_' + 'Z9'.repeat(18),
+      'github_pat_' + 'A1_'.repeat(20),
+      'npm_' + 'b'.repeat(36),
+      'xoxb-' + '1234567890-abcdef',
+      'AKIA' + 'ABCDEFGHIJKLMNOP',
+    ];
+    const out = excerpt(tokens.map((t, i) => `line ${i}: token=${t} end`).join('\n'));
+    for (const t of tokens) expect(out).not.toContain(t);
+    expect(out.split('\n')[0]).toBe('line 0: token=[redacted] end');
+  });
 });
 
 describe('replayGates', () => {

@@ -124,6 +124,8 @@ export async function runCommand(opts: RunOptions, io: IO): Promise<RunOutcome> 
         assumeGreen: opts.assumeGreen,
         timeoutMs: opts.timeoutMs,
         onProgress: progress(io, opts.quiet),
+        // The token falsegreen reads the API with never reaches a replayed step.
+        ...(opts.tokenEnv ? { stripEnv: [opts.tokenEnv] } : {}),
       });
     } finally {
       uninstall();

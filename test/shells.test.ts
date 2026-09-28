@@ -53,6 +53,45 @@ describe('runStep', () => {
     expect(r.output.trim()).toBe('step env');
   });
 
+  it('keeps host credentials out of the step, as a runner does', async () => {
+    // A runner gives a step secrets only through the workflow's env:, which is never rebuilt.
+    process.env.FG_TEST_API_TOKEN = 'not-a-real-value';
+    process.env.FG_TEST_CUSTOM = 'named by --token-env';
+    try {
+      const gate = fakeGate({
+        run: 'echo "[${FG_TEST_API_TOKEN:-unset}] [${FG_TEST_CUSTOM:-unset}] [${HOME:+home}]"',
+      });
+      const r = await runStep(makeTempDir('step'), gate, {
+        timeoutMs: 10_000,
+        stripEnv: ['FG_TEST_CUSTOM'],
+      });
+      expect(r.output.trim()).toBe('[unset] [unset] [home]');
+    } finally {
+      delete process.env.FG_TEST_API_TOKEN;
+      delete process.env.FG_TEST_CUSTOM;
+    }
+  });
+
+  it("points the runner's variables at the repository and at files of the step's own", async () => {
+    const root = makeTempDir('step');
+    const gate = fakeGate({
+      run: [
+        'echo "workspace=$GITHUB_WORKSPACE"',
+        'test -d "$RUNNER_TEMP" && echo temp-ok',
+        'echo "X=1" >> "$GITHUB_ENV" && echo env-ok',
+        'test "$GITHUB_OUTPUT" != "$HOST_GITHUB_OUTPUT" && echo output-ok',
+      ].join('\n'),
+      env: { HOST_GITHUB_OUTPUT: process.env.GITHUB_OUTPUT ?? 'none' },
+    });
+    const r = await runStep(root, gate, { timeoutMs: 10_000 });
+    expect(r.output.trim().split('\n')).toEqual([
+      `workspace=${root}`,
+      'temp-ok',
+      'env-ok',
+      'output-ok',
+    ]);
+  });
+
   it('says which shell is missing when a custom shell is not installed', async () => {
     // spf13/cobra's Windows job runs its steps under `shell: msys2 {0}`.
     const gate = fakeGate({ run: 'make test', shell: 'falsegreen-no-such-shell {0}' });
