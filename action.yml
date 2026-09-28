@@ -59,7 +59,11 @@ runs:
       uses: actions/setup-node@v7
       with:
         node-version: ${{ inputs.node-version }}
+        # The action installs its own copy in RUNNER_TEMP. Caching the caller's npm dependencies
+        # is not its business, and fails when package.json names npm but no lockfile exists.
+        package-manager-cache: false
     - id: install
+      name: Install falsegreen
       shell: bash
       env:
         FG_VERSION: ${{ inputs.version }}
@@ -75,6 +79,7 @@ runs:
         npm i "falsegreen@${FG_VERSION}" >/dev/null
         echo "dir=$DIR" >> "$GITHUB_OUTPUT"
     - id: run
+      name: Run falsegreen
       shell: bash
       # Run from the workspace so falsegreen finds the repository, its workflows and its config.
       # Inputs arrive through env and are never interpolated into the script, because ${{ }}

@@ -133,6 +133,14 @@ describe('action inputs', () => {
     );
   });
 
+  it("leaves the caller's npm cache alone when it sets up Node", () => {
+    // setup-node caches the repository's dependencies when package.json names npm, and fails
+    // when that repository has no lockfile. The action installs its own copy and needs neither.
+    expect(actionYml).toMatch(
+      / {6}uses: actions\/setup-node@v\d+\n {6}with:\n(?: {8}.*\n)* {8}package-manager-cache: false\n/,
+    );
+  });
+
   it('marks the token as the workflow token only when it is github.token', () => {
     expect(actionYml).toContain(
       "FG_TOKEN_KIND: ${{ inputs.token == github.token && 'github-token' || 'personal-or-app' }}",

@@ -46,10 +46,126 @@ jobs:
       - name: Build
         run: npm run build
 
+      # Fixture tests whose toolchain is missing here skip; the fixtures job runs all of them.
+      - name: Test
+        run: npm test
+
+  fixtures:
+    name: fixtures (every toolchain)
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    env:
+      # A fixture test whose toolchain is missing fails instead of skipping.
+      FALSEGREEN_REQUIRE_TOOLCHAINS: '1'
+    steps:
+      - uses: actions/checkout@v7
+
+      # The engines floor, so the coverage run proves the oldest supported Node.
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22
+          cache: npm
+
+      - uses: actions/setup-go@v7
+        with:
+          go-version: stable
+          cache: false
+
+      - uses: actions/setup-java@v6
+        with:
+          distribution: temurin
+          java-version: 25
+
+      # setup-uv publishes no major tags and asks to be pinned by commit.
+      - uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7 # v10.2.0
+        with:
+          enable-cache: false
+
+      - uses: oven-sh/setup-bun@v2
+
+      - name: Install dependencies
+        run: npm ci
+
+      # Python tools, Go linters, cargo-nextest, Gradle and Maven, all under tmp/. Rust, make and
+      # the C compiler come with the runner image.
+      - name: Install fixture toolchains
+        run: scripts/toolchains.sh
+
       - name: Test with coverage gates
-        if: ${{ matrix.node-version == 22 }}
         run: npm run test:coverage
 
-      - name: Test
-        if: ${{ matrix.node-version != 22 }}
-        run: npm test
+  action:
+    name: composite action
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 24
+          cache: npm
+
+      - run: npm ci
+      - run: npm run build
+
+      - name: Pack the local release artifact
+        id: package
+        run: echo "path=$GITHUB_WORKSPACE/$(npm pack --silent)" >> "$GITHUB_OUTPUT"
+
+      # One step caught by its test, one masked by `|| true`. Under tmp/, vitest resolves from
+      # this checkout's node_modules.
+      - name: Commit a copy of the js-vitest fixture
+        run: |
+          mkdir -p tmp
+          cp -R test/fixtures/js-vitest tmp/smoke
+          rm tmp/smoke/expected.json
+          git -C tmp/smoke init -q
+          git -C tmp/smoke add -A
+          git -C tmp/smoke -c user.name=falsegreen -c user.email=falsegreen@example.invalid commit -qm fixture
+
+      # Both runs find something at high, so the action exits 1; the checks below read the
+      # outputs instead of the step result.
+      - name: Static mode through the action
+        id: static
+        continue-on-error: true
+        uses: ./
+        with:
+          mode: static
+          version: file:${{ steps.package.outputs.path }}
+          node-version: ''
+          args: -C tmp/smoke
+          report-name: falsegreen-static
+
+      - name: Check the static outputs
+        env:
+          EXIT_CODE: ${{ steps.static.outputs.exit-code }}
+          FINDINGS: ${{ steps.static.outputs.findings }}
+          DEAD_GATES: ${{ steps.static.outputs.dead-gates }}
+          SARIF: ${{ steps.static.outputs.sarif-path }}
+        run: |
+          test "$EXIT_CODE" = 1
+          test "$FINDINGS" = 1
+          test "$DEAD_GATES" = 0
+          test -f "$SARIF"
+
+      - name: Run mode through the action
+        id: run
+        continue-on-error: true
+        uses: ./
+        with:
+          version: file:${{ steps.package.outputs.path }}
+          args: -C tmp/smoke
+          report-name: falsegreen-run
+
+      - name: Check the run outputs
+        env:
+          EXIT_CODE: ${{ steps.run.outputs.exit-code }}
+          FINDINGS: ${{ steps.run.outputs.findings }}
+          DEAD_GATES: ${{ steps.run.outputs.dead-gates }}
+          REPORT: ${{ steps.run.outputs.report-path }}
+        run: |
+          test "$EXIT_CODE" = 1
+          test "$FINDINGS" = 2
+          test "$DEAD_GATES" = 1
+          grep -q 'dead-gate' "$REPORT/summary.md"

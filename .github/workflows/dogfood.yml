@@ -1,0 +1,63 @@
+name: Dogfood
+
+# falsegreen on this repository: the static checks, then every gate in the CI test job replayed
+# with planted faults. The findings go to code scanning. Weekly, and when a workflow, the action
+# or the package changes on main.
+on:
+  schedule:
+    - cron: '23 6 * * 1'
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/**'
+      - 'action.yml'
+      - 'package.json'
+      - 'falsegreen.config.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: dogfood-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  falsegreen:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    permissions:
+      contents: read
+      security-events: write # upload the SARIF to code scanning
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 24
+          cache: npm
+
+      - run: npm ci
+      - run: npm run build
+
+      # The action installs this checkout's build, so a change to falsegreen is judged by itself.
+      - name: Pack this checkout
+        id: package
+        run: echo "path=$GITHUB_WORKSPACE/$(npm pack --silent)" >> "$GITHUB_OUTPUT"
+
+      # The fixtures job needs every toolchain; the test job needs only this checkout's
+      # node_modules, so it is the one replayed here.
+      - name: Run falsegreen
+        id: falsegreen
+        uses: ./
+        with:
+          version: file:${{ steps.package.outputs.path }}
+          node-version: ''
+          args: --job test
+
+      - name: Upload the findings to code scanning
+        if: ${{ always() && steps.falsegreen.outputs.sarif-path != '' }}
+        uses: github/codeql-action/upload-sarif@v4
+        with:
+          sarif_file: ${{ steps.falsegreen.outputs.sarif-path }}
+          category: falsegreen
