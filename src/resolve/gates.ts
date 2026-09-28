@@ -20,7 +20,12 @@ import {
   type SimpleCommand,
 } from '../shell/parse';
 import { checkName } from '../workflow/checks';
-import { emptyContext, substitute, type ExprContext } from '../workflow/expressions';
+import {
+  conditionHolds,
+  emptyContext,
+  substitute,
+  type ExprContext,
+} from '../workflow/expressions';
 import { expandMatrix } from '../workflow/matrix';
 import type { JobModel, StepModel, WorkflowModel } from '../workflow/model';
 import { makeCall, makeDryRun } from './make';
@@ -484,25 +489,44 @@ export function resolveAll(
     for (const job of wf.jobs) {
       if (job.usesWorkflow !== undefined) continue;
       const combos = expandMatrix(job.matrix);
-      const chosen = opts.matrix === 'first' ? combos.slice(0, 1) : combos.slice(0, cfg.matrix.max);
-      chosen.forEach((combo, comboIndex) => {
-        for (const step of job.steps) {
-          const resolved = resolveStep(
-            root,
-            tracked,
-            wf,
-            job,
-            step,
-            combo,
-            comboIndex,
-            { github, runner, inputs },
-            cfg,
-          );
-          if (resolved && 'key' in resolved) gates.push(resolved);
-          // Matrix combinations repeat the same empty step; report it once.
-          else if (resolved && comboIndex === 0) emptySteps.push(resolved);
+      // A step whose `if` is false for a leg does not run there. Only a definite false skips it:
+      // a condition on the event or the branch leaves the step in.
+      const runsIn = (step: StepModel, combo: Record<string, string>): boolean =>
+        step.if === undefined || conditionHolds(step.if, combo) !== false;
+      // `first` judges each step once, in the first leg that runs it; `all` judges every leg.
+      const legs: [StepModel, number][] =
+        opts.matrix === 'first'
+          ? job.steps.flatMap((step): [StepModel, number][] => {
+              const i = combos.findIndex((combo) => runsIn(step, combo));
+              return i < 0 ? [] : [[step, i]];
+            })
+          : combos
+              .slice(0, cfg.matrix.max)
+              .flatMap((combo, i) =>
+                job.steps
+                  .filter((step) => runsIn(step, combo))
+                  .map((s): [StepModel, number] => [s, i]),
+              );
+      const reported = new Set<StepModel>();
+      for (const [step, comboIndex] of legs) {
+        const resolved = resolveStep(
+          root,
+          tracked,
+          wf,
+          job,
+          step,
+          combos[comboIndex]!,
+          comboIndex,
+          { github, runner, inputs },
+          cfg,
+        );
+        if (resolved && 'key' in resolved) gates.push(resolved);
+        // Matrix combinations repeat the same empty step; report it once.
+        else if (resolved && !reported.has(step)) {
+          reported.add(step);
+          emptySteps.push(resolved);
         }
-      });
+      }
     }
   }
   return { gates, emptySteps };

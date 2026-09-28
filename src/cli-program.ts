@@ -54,7 +54,10 @@ function withSelection(cmd: Command): Command {
     .option('--job <id...>', 'only these jobs (id, name or check name)')
     .option('--step <name...>', 'only these steps (as named in the report)')
     .addOption(
-      new Option('--matrix <which>', 'matrix combinations to replay')
+      new Option(
+        '--matrix <which>',
+        'first: each step once, in the first matrix leg that runs it; all: every leg, up to matrix.max',
+      )
         .choices(['first', 'all'])
         .default('first'),
     );

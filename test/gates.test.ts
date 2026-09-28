@@ -67,6 +67,15 @@ jobs:
       NODE: \${{ matrix.node }}
     steps:
       - run: npm test
+      - name: Coverage
+        if: matrix.node == 20
+        run: npx vitest run --coverage
+      - name: Newer Node only
+        if: \${{ matrix.node != 20 }}
+        run: npx vitest run
+      - name: Never
+        if: failure()
+        run: npx vitest run
 `;
 
 let repo: TempRepo;
@@ -200,15 +209,37 @@ describe('resolveGates', () => {
   });
 
   it('expands the first matrix combination by default and all of them on request', () => {
-    const first = gates.filter((g) => g.jobId === 'matrix');
+    const first = gates.filter((g) => g.jobId === 'matrix' && g.stepName === 'Run npm test');
     expect(first).toHaveLength(1);
     expect(first[0]!.checkName).toBe('matrix (20)');
     expect(first[0]!.env).toEqual({ GLOBAL: 'yes', NODE: '20' });
     const all = resolveGates(repo.root, loadWorkflows(repo.root), loadConfig(repo.root), {
       matrix: 'all',
-    }).filter((g) => g.jobId === 'matrix');
+    }).filter((g) => g.jobId === 'matrix' && g.stepName === 'Run npm test');
     expect(all.map((g) => g.combo)).toEqual([{ node: '20' }, { node: '22' }, { node: '24' }]);
     expect(new Set(all.map((g) => g.key)).size).toBe(3);
+  });
+
+  it('judges a step only in the matrix legs its if lets it run in', () => {
+    const legs = (list: Gate[]) =>
+      list.filter((g) => g.jobId === 'matrix').map((g) => `${g.stepName} @ ${g.checkName}`);
+    // With the first leg only, a step that skips that leg is judged in the first leg that runs it.
+    expect(legs(gates)).toEqual([
+      'Run npm test @ matrix (20)',
+      'Coverage @ matrix (20)',
+      'Newer Node only @ matrix (22)',
+    ]);
+    const all = resolveGates(repo.root, loadWorkflows(repo.root), loadConfig(repo.root), {
+      matrix: 'all',
+    });
+    expect(legs(all)).toEqual([
+      'Run npm test @ matrix (20)',
+      'Coverage @ matrix (20)',
+      'Run npm test @ matrix (22)',
+      'Newer Node only @ matrix (22)',
+      'Run npm test @ matrix (24)',
+      'Newer Node only @ matrix (24)',
+    ]);
   });
 
   it('points every gate at its workflow line', () => {
