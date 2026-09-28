@@ -5,6 +5,7 @@ import { join } from 'node:path';
 
 import { runProcess, type ProcResult } from '../core/proc';
 import type { Gate } from '../resolve/gates';
+import { RUNNER_ENV } from '../shell/runner';
 import { shellCommand } from './shells';
 
 function refused(reason: string): ProcResult {
@@ -33,7 +34,8 @@ export async function runStep(
     if ('unsupported' in command) return refused(`shell ${command.unsupported} cannot run here`);
     return await runProcess(command.cmd, command.args, {
       cwd,
-      env: { ...process.env, ...gate.env, CI: 'true' },
+      // What a runner sets comes first, so the workflow's own env can still override it.
+      env: { ...process.env, ...RUNNER_ENV, ...gate.env },
       timeoutMs: opts.timeoutMs,
     });
   } finally {

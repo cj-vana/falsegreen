@@ -68,6 +68,13 @@ function stripOne(argv: string[]): { argv: string[]; wrapper: string } | undefin
   if (isPython(head) && second === '-m' && argv[2] !== undefined) {
     return { argv: argv.slice(2), wrapper: 'python -m' };
   }
+  // `coverage run -m pytest`; `coverage run script.py` runs a file, not a tool.
+  if (two === 'coverage run') {
+    const m = argv.indexOf('-m', 2);
+    if (m > 0 && argv[m + 1] !== undefined) {
+      return { argv: argv.slice(m + 1), wrapper: 'coverage run' };
+    }
+  }
   if (head === 'env') {
     let i = skipFlags(argv, 1, 'env');
     while (i < argv.length && /^[A-Za-z_][A-Za-z0-9_]*=/.test(argv[i]!)) i++;
@@ -83,15 +90,24 @@ function stripOne(argv: string[]): { argv: string[]; wrapper: string } | undefin
   return undefined;
 }
 
+/**
+ * The name a command runs under: `venv/bin/ruff` and `$(npm bin)/eslint` by their basename,
+ * `${PREFIX}ruff` (a directory variable in front of the tool, as httpx writes it) by the name.
+ */
+function commandName(a: string): string {
+  const name = a.includes('/') ? basename(a) : a;
+  return /^\$\{[A-Za-z_]\w*\}([A-Za-z][\w.+-]*)$/.exec(name)?.[1] ?? name;
+}
+
 /** Strips every leading wrapper; `wrapper` names the outermost one. */
 export function stripWrappers(argv: string[]): { argv: string[]; wrapper?: string } {
-  let current = argv.map((a, i) => (i === 0 && a.includes('/') ? basename(a) : a));
+  let current = argv.map((a, i) => (i === 0 ? commandName(a) : a));
   let wrapper: string | undefined;
   for (let depth = 0; depth < 8; depth++) {
     const next = stripOne(current);
     if (!next || next.argv.length === 0) break;
     wrapper ??= next.wrapper;
-    current = next.argv.map((a, i) => (i === 0 && a.includes('/') ? basename(a) : a));
+    current = next.argv.map((a, i) => (i === 0 ? commandName(a) : a));
   }
   return wrapper === undefined ? { argv: current } : { argv: current, wrapper };
 }

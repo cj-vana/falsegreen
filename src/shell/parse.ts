@@ -19,8 +19,16 @@ export interface SimpleCommand {
   assignments: { name: string; value: string }[];
   /** The assignment words themselves, kept for the substitutions inside them. */
   prefix: Word[];
+  /** The `if` branches the command sits in, outermost first. */
+  guards?: Guard[];
   start: number;
   end: number;
+}
+
+/** One `if` around a command: it runs when `test` succeeds (`then`) or fails (`else`). */
+export interface Guard {
+  test: SimpleCommand[];
+  when: 'then' | 'else';
 }
 
 export interface Pipeline {
@@ -81,6 +89,8 @@ export function parseShell(text: string, base = 0): ShellScript {
   const functions: string[] = [];
   // Set after the `function` keyword: the next word names the function.
   let functionName = false;
+  // Open `if` statements, innermost last. `test` holds the commands of the current condition.
+  const ifs: { phase: 'test' | 'then' | 'else'; test: SimpleCommand[] }[] = [];
 
   let cmd: SimpleCommand | null = null;
   let pipeline: Pipeline = { commands: [], negated: false };
@@ -93,8 +103,24 @@ export function parseShell(text: string, base = 0): ShellScript {
   let caseDepth = 0;
 
   const flushCommand = (): void => {
-    if (cmd && (cmd.argv.length > 0 || cmd.assignments.length > 0)) pipeline.commands.push(cmd);
+    const c: SimpleCommand | null = cmd;
     cmd = null;
+    if (!c || (c.argv.length === 0 && c.assignments.length === 0)) return;
+    pipeline.commands.push(c);
+    const guards = ifs.flatMap((f): Guard[] =>
+      f.phase === 'test' ? [] : [{ test: f.test, when: f.phase }],
+    );
+    if (guards.length > 0) {
+      c.guards = guards;
+      // Commands inside $(...) run only when this one does.
+      for (const w of [...c.prefix, ...c.argv]) {
+        for (const sub of w.substitutions) {
+          for (const inner of allCommands(sub)) inner.guards = [...guards, ...(inner.guards ?? [])];
+        }
+      }
+    }
+    const top = ifs.at(-1);
+    if (top?.phase === 'test') top.test.push(c);
   };
   const flushPipeline = (): void => {
     flushCommand();
@@ -143,8 +169,14 @@ export function parseShell(text: string, base = 0): ShellScript {
       }
       const atStart = !cmd || (cmd.argv.length === 0 && cmd.assignments.length === 0);
       if (atStart && RESERVED.has(raw.value) && raw.raw === raw.value) {
+        const top = ifs.at(-1);
         if (raw.value === '!') pipeline.negated = true;
         else if (raw.value === 'function') functionName = true;
+        else if (raw.value === 'if') ifs.push({ phase: 'test', test: [] });
+        else if (raw.value === 'then' && top) top.phase = 'then';
+        else if (raw.value === 'elif' && top) Object.assign(top, { phase: 'test', test: [] });
+        else if (raw.value === 'else' && top) top.phase = 'else';
+        else if (raw.value === 'fi') ifs.pop();
         else if (raw.value === 'for' || raw.value === 'select') skipUntilSeparator = true;
         else if (raw.value === 'case') {
           caseDepth++;

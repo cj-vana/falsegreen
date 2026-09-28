@@ -4,7 +4,9 @@ import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
 
 import { runProcess } from '../src/core/proc';
+import { runStep } from '../src/local/runner';
 import { shellCommand } from '../src/local/shells';
+import { fakeGate } from './helpers/gate';
 import { makeTempDir } from './helpers/repo';
 
 // Templates from https://docs.github.com/en/actions/reference/workflows-and-actions/workflow-syntax
@@ -37,5 +39,17 @@ describe('shellCommand', () => {
     };
     expect(await run(undefined)).toBe(0);
     expect(await run('bash')).toBe(1);
+  });
+});
+
+describe('runStep', () => {
+  it('runs the step with the variables a runner sets, so scripts take their CI branches', async () => {
+    const gate = fakeGate({
+      run: 'test "$GITHUB_ACTIONS" = true && test "$CI" = true && echo "$FROM_STEP"',
+      env: { FROM_STEP: 'step env' },
+    });
+    const r = await runStep(makeTempDir('step'), gate, { timeoutMs: 10_000 });
+    expect(r.exitCode).toBe(0);
+    expect(r.output.trim()).toBe('step env');
   });
 });

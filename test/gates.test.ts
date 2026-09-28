@@ -59,6 +59,10 @@ jobs:
           ./run-tests.sh
       - name: Announce
         run: ./notify --verify-tag --with-tests
+      - name: Script dir
+        run: tools/check
+      - name: Script with CI branches
+        run: tools/test
   matrix:
     strategy:
       matrix:
@@ -103,6 +107,21 @@ beforeAll(() => {
     'web/package.json': JSON.stringify({ scripts: { test: 'jest' } }),
     Makefile: 'test:\n\tgo test ./...\n',
     'scripts/ci.sh': '#!/bin/sh\nset -e\npytest -q\n',
+    // httpx's layout: scripts without ./ or an extension, and tools behind ${PREFIX}.
+    'tools/check': '#!/bin/sh -e\nexport PREFIX=""\n${PREFIX}ruff check src\n',
+    'tools/test': [
+      '#!/bin/sh',
+      'if [ -z "$GITHUB_ACTIONS" ]; then',
+      '  tools/check',
+      'fi',
+      'if [ -n "${CI}" ]; then',
+      '  ${PREFIX}mypy src',
+      'else',
+      '  black --check src',
+      'fi',
+      'if [ "$RUNNER_OS" = Linux ]; then isort --check src; fi',
+      '${PREFIX}coverage run -m pytest "$@"',
+    ].join('\n'),
     '.pre-commit-config.yaml':
       'repos:\n  - repo: https://github.com/astral-sh/ruff-pre-commit\n    rev: v0.9.0\n    hooks:\n      - id: ruff\n  - repo: https://github.com/psf/black\n    rev: 25.1.0\n    hooks:\n      - id: black\n',
     '.github/actions/lint/action.yml':
@@ -167,6 +186,21 @@ describe('resolveGates', () => {
     expect(gates.find((g) => g.stepName === 'Announce')).toBeUndefined();
     expect(gate('Package').invocations.map((i) => [i.tool, i.argv.join(' ')])).toEqual([
       ['generic', './run-tests.sh'],
+    ]);
+  });
+
+  it('follows scripts named by a relative path and tools behind a ${PREFIX}', () => {
+    expect(gate('Script dir').invocations.map((i) => [i.tool, i.via.at(-2)])).toEqual([
+      ['ruff-check', 'tools/check'],
+    ]);
+  });
+
+  it('leaves out script branches that GitHub Actions never takes', () => {
+    // GITHUB_ACTIONS and CI are "true" on a runner; RUNNER_OS is unknown here, so isort stays.
+    expect(gate('Script with CI branches').invocations.map((i) => i.tool)).toEqual([
+      'mypy',
+      'isort',
+      'pytest',
     ]);
   });
 

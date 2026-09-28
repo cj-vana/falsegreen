@@ -19,6 +19,7 @@ import {
   type ShellScript,
   type SimpleCommand,
 } from '../shell/parse';
+import { skippedOnRunner } from '../shell/runner';
 import { checkName } from '../workflow/checks';
 import {
   conditionHolds,
@@ -282,7 +283,7 @@ function walkScript(
   const stack: string[] = [];
   for (const cmd of allCommands(script)) {
     const argv = words(cmd);
-    if (argv.length === 0) continue;
+    if (argv.length === 0 || skippedOnRunner(cmd)) continue;
     const [head, target] = argv;
     if (head === 'cd' || head === 'pushd') {
       const dynamic = cmd.argv[1]?.dynamic ?? true;
@@ -369,11 +370,12 @@ function resolveCommand(
     return walkScript(dry.output, make.label, 'make', make.dir, [...via, label], w, depth + 1);
   }
 
-  const [head, first] = argv;
+  const [head] = argv;
+  // `bash -e scripts/ci.sh`, `./ci.sh`, or `scripts/check` with no extension, as httpx does.
   const scriptPath =
     head === 'bash' || head === 'sh' || head === 'zsh'
-      ? first
-      : head?.startsWith('./')
+      ? argv.slice(1).find((a) => !a.startsWith('-'))
+      : head?.includes('/') && !head.startsWith('/')
         ? head
         : undefined;
   if (scriptPath !== undefined) {
@@ -391,7 +393,7 @@ function resolveCommand(
     }
   }
 
-  if (head === 'pre-commit' && first === 'run') {
+  if (head === 'pre-commit' && argv[1] === 'run') {
     const hook = argv.slice(2).find((a) => !a.startsWith('-'));
     const tools = precommitTools(w.root, hook);
     if (!argv.includes('--all-files') && !argv.includes('-a')) {
@@ -581,7 +583,12 @@ function resolveStep(
       // is one; `python3` alone is only a launcher, so wrappers are stripped first.
       const candidates = allCommands(trace.script).filter((c) => {
         const head = stripWrappers(words(c)).argv[0];
-        return head !== undefined && !UTILITIES.has(head) && !trace.script.functions.includes(head);
+        return (
+          head !== undefined &&
+          !UTILITIES.has(head) &&
+          !trace.script.functions.includes(head) &&
+          !skippedOnRunner(c)
+        );
       });
       // A check-named step runs its first candidate; otherwise a candidate has to name a check
       // itself in its name or arguments. Comments, echo text and flags such as `--verify-tag`
