@@ -560,10 +560,15 @@ function resolveStep(
         return head !== undefined && !UTILITIES.has(head) && !trace.script.functions.includes(head);
       });
       // A check-named step runs its first candidate; otherwise a candidate has to name a check
-      // itself. Comments and echo text say nothing about what runs.
-      const cmd = CHECK_NAMED.test(step.name ?? '')
-        ? candidates[0]
-        : candidates.find((c) => CHECK_NAMED.test(words(c).join(' ')));
+      // itself in its name or arguments. Comments, echo text and flags such as `--verify-tag`
+      // say nothing about what runs.
+      const namesCheck = (c: SimpleCommand): boolean =>
+        CHECK_NAMED.test(
+          words(c)
+            .filter((w) => !w.startsWith('-'))
+            .join(' '),
+        );
+      const cmd = CHECK_NAMED.test(step.name ?? '') ? candidates[0] : candidates.find(namesCheck);
       if (cmd) {
         // The static shell rules look for masking around this command, like any other gate.
         trace.gateCommands.push(cmd);

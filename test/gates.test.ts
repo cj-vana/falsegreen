@@ -57,6 +57,8 @@ jobs:
         run: |
           ./configure --prefix=dist
           ./run-tests.sh
+      - name: Announce
+        run: ./notify --verify-tag --with-tests
   matrix:
     strategy:
       matrix:
@@ -151,8 +153,9 @@ describe('resolveGates', () => {
     ]);
   });
 
-  it('looks for check words in commands, not in comments, builtins or local functions', () => {
+  it('looks for check words in commands, not in comments, flags, builtins or local functions', () => {
     expect(gates.find((g) => g.stepName === 'Build the site')).toBeUndefined();
+    expect(gates.find((g) => g.stepName === 'Announce')).toBeUndefined();
     expect(gate('Package').invocations.map((i) => [i.tool, i.argv.join(' ')])).toEqual([
       ['generic', './run-tests.sh'],
     ]);
