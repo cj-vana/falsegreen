@@ -2,11 +2,11 @@
  * Local mode: for each gate, run the step clean (the baseline), then once per fault with the fault
  * planted, and decide from the exit code and the output whether the gate caught it.
  */
-import { readFileSync } from 'node:fs';
-import { join } from 'node:path';
+import { existsSync, mkdirSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs';
+import { dirname, join } from 'node:path';
 
 import type { ResolvedConfig } from '../config/load';
-import { modifiedTracked, restoreFromHead, trackedFiles } from '../core/git';
+import { modifiedTracked, restoreFromHead, trackedFiles, uncommittedPaths } from '../core/git';
 import { newMarker, outputMentions, type Marker } from '../core/marker';
 import type { ProcResult } from '../core/proc';
 import type { Tier, Verdict } from '../core/types';
@@ -117,6 +117,43 @@ function stepTimeout(gate: Gate, fallback: number): number {
   return gate.step.timeoutMinutes !== undefined ? gate.step.timeoutMinutes * 60_000 : fallback;
 }
 
+/** How much uncommitted work falsegreen keeps a copy of while it replays; beyond it, it refuses. */
+const WORK_LIMIT = 64 * 1024 * 1024;
+
+/**
+ * A copy of the user's uncommitted work, taken before a gate runs: HEAD cannot give these bytes
+ * back if a step overwrites or deletes them. A string says why no copy was taken.
+ */
+function snapshotWork(root: string): Map<string, Buffer> | string {
+  const work = new Map<string, Buffer>();
+  let size = 0;
+  for (const path of uncommittedPaths(root)) {
+    const full = join(root, path);
+    if (!existsSync(full) || !statSync(full).isFile()) continue;
+    const bytes = readFileSync(full);
+    size += bytes.length;
+    if (size > WORK_LIMIT) {
+      return `the tree holds more than ${WORK_LIMIT / 1024 / 1024} MB of uncommitted or untracked files; commit, stash or ignore them so a step cannot overwrite them`;
+    }
+    work.set(path, bytes);
+  }
+  return work;
+}
+
+/** Puts back every snapshotted file a step changed or deleted; returns their paths. */
+function restoreWork(root: string, work: Map<string, Buffer>): string[] {
+  const changed: string[] = [];
+  for (const [path, bytes] of work) {
+    const full = join(root, path);
+    if (existsSync(full) && statSync(full).isFile() && readFileSync(full).equals(bytes)) continue;
+    rmSync(full, { recursive: true, force: true });
+    mkdirSync(dirname(full), { recursive: true });
+    writeFileSync(full, bytes);
+    changed.push(path);
+  }
+  return changed.sort();
+}
+
 /** Restores tracked files the step changed; returns their paths. */
 function undoTrackedChanges(root: string, before: Set<string>): string[] {
   const changed = modifiedTracked(root).filter((p) => !before.has(p));
@@ -138,8 +175,21 @@ async function replayGate(
   if (refused) return { gate, status: 'unjudged', reason: refused, runs: [] };
   const timeoutMs = stepTimeout(gate, opts.timeoutMs);
   const step = { timeoutMs, ...(opts.stripEnv ? { stripEnv: opts.stripEnv } : {}) };
+  const work = snapshotWork(root);
+  if (typeof work === 'string') return { gate, status: 'unjudged', reason: work, runs: [] };
   const dirtyBefore = new Set(modifiedTracked(root));
   const result: GateResult = { gate, status: 'judged', runs: [] };
+  /** Undoes what a run did to the tree; why the gate cannot be judged when it did anything. */
+  const afterRun = (): string | undefined => {
+    const lost = restoreWork(root, work);
+    const changed = undoTrackedChanges(root, dirtyBefore);
+    if (lost.length > 0) {
+      return `the step changed files with uncommitted work: ${lost.join(', ')} (restored)`;
+    }
+    if (changed.length > 0)
+      return `the step changed tracked files: ${changed.join(', ')} (restored)`;
+    return undefined;
+  };
 
   if (!opts.assumeGreen) {
     const base = await runStep(root, gate, step);
@@ -149,14 +199,8 @@ async function replayGate(
       durationMs: base.durationMs,
       excerpt: excerpt(base.output),
     };
-    const changed = undoTrackedChanges(root, dirtyBefore);
-    if (changed.length > 0) {
-      return {
-        ...result,
-        status: 'unjudged',
-        reason: `the step changed tracked files: ${changed.join(', ')} (restored)`,
-      };
-    }
+    const touched = afterRun();
+    if (touched) return { ...result, status: 'unjudged', reason: touched };
     const why = unjudgedReason(base, timeoutMs);
     if (why) return { ...result, status: 'unjudged', reason: why };
     if (base.exitCode !== 0)
@@ -216,14 +260,8 @@ async function replayGate(
       result.runs.push(run);
       opts.onProgress?.({ type: 'fault', gate, run });
 
-      const changed = undoTrackedChanges(root, dirtyBefore);
-      if (changed.length > 0) {
-        return {
-          ...result,
-          status: 'unjudged',
-          reason: `the step changed tracked files: ${changed.join(', ')} (restored)`,
-        };
-      }
+      const touched = afterRun();
+      if (touched) return { ...result, status: 'unjudged', reason: touched };
     }
   }
   return result;

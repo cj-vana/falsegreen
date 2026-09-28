@@ -75,6 +75,24 @@ export function modifiedTracked(root: string): string[] {
     .map((entry) => entry.slice(3));
 }
 
+/**
+ * Paths holding work that HEAD does not have: changed, added or renamed tracked files, and
+ * untracked files git does not ignore. Deleted paths are left out, since there is nothing to keep.
+ */
+export function uncommittedPaths(root: string): string[] {
+  const fields = git(root, ['status', '--porcelain=v1', '-z', '--untracked-files=all']).split('\0');
+  const paths: string[] = [];
+  for (let i = 0; i < fields.length; i++) {
+    const entry = fields[i]!;
+    if (entry.length <= 3) continue;
+    const xy = entry.slice(0, 2);
+    // A rename or copy is followed by a field with the path it came from.
+    if (/[RC]/.test(xy)) i++;
+    if (!xy.includes('D')) paths.push(entry.slice(3));
+  }
+  return paths;
+}
+
 /** Puts paths back to their HEAD content, in the index and the working tree. */
 export function restoreFromHead(root: string, paths: string[]): void {
   if (paths.length > 0) git(root, ['checkout', 'HEAD', '--', ...paths]);

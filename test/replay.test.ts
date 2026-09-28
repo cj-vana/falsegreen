@@ -1,4 +1,4 @@
-import { existsSync } from 'node:fs';
+import { existsSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 
 import { afterEach, describe, expect, it } from 'vitest';
@@ -156,5 +156,23 @@ describe('replayGates', () => {
     expect(r.status).toBe('unjudged');
     expect(r.reason).toMatch(/changed tracked files: src\/sum\.ts/);
     expect(statusPorcelain(root)).toBe('');
+  });
+
+  it('puts back uncommitted edits and untracked files a step overwrites or deletes', async () => {
+    // The user's work in progress: an edited tracked file and a new file not yet added.
+    const { root, gate } = setup();
+    const edited = 'export const sum = (a: number, b: number): number => b + a; // wip\n';
+    repo!.write('src/sum.ts', edited);
+    repo!.write('notes.md', 'my notes\n');
+    const r = await replay(root, {
+      ...gate,
+      run: 'echo generated > src/sum.ts && rm notes.md && npx vitest run',
+    });
+    expect(r.status).toBe('unjudged');
+    expect(r.reason).toBe(
+      'the step changed files with uncommitted work: notes.md, src/sum.ts (restored)',
+    );
+    expect(readFileSync(join(root, 'src/sum.ts'), 'utf8')).toBe(edited);
+    expect(readFileSync(join(root, 'notes.md'), 'utf8')).toBe('my notes\n');
   });
 });

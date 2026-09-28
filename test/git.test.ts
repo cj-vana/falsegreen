@@ -13,6 +13,7 @@ import {
   resetPaths,
   statusPorcelain,
   trackedFiles,
+  uncommittedPaths,
 } from '../src/core/git';
 import { makeRepo, makeTempDir, type TempRepo } from './helpers/repo';
 
@@ -77,6 +78,28 @@ describe('git helpers', () => {
     expect(originSlug(repo.root)).toBe('cj-vana/buttonmash');
     repo.git('remote', 'set-url', 'origin', 'ssh://git@ghe.example.com/team/app');
     expect(originSlug(repo.root)).toBe('team/app');
+  });
+
+  it('lists every path with uncommitted work, and nothing deleted or ignored', () => {
+    repo = makeRepo({
+      'edited.txt': 'a\n',
+      'moved.txt': 'b\n',
+      'gone.txt': 'c\n',
+      '.gitignore': 'ignored.log\n',
+    });
+    repo.write('edited.txt', 'a2\n');
+    repo.git('mv', 'moved.txt', 'renamed.txt');
+    repo.git('rm', '-q', 'gone.txt');
+    repo.write('new/untracked.txt', 'd\n');
+    repo.write('staged.txt', 'e\n');
+    repo.git('add', 'staged.txt');
+    repo.write('ignored.log', 'f\n');
+    expect(uncommittedPaths(repo.root).sort()).toEqual([
+      'edited.txt',
+      'new/untracked.txt',
+      'renamed.txt',
+      'staged.txt',
+    ]);
   });
 
   it('has no slug when origin is a local clone', () => {
