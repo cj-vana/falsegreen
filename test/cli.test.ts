@@ -5,6 +5,8 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import { buildProgram, runCli, type CliIO } from '../src/cli-program';
 import { statusPorcelain } from '../src/core/git';
+import { journalPath } from '../src/plant/journal';
+import { plant } from '../src/plant/planter';
 import type { Report } from '../src/report/model';
 import { version } from '../src/version';
 import { copyFixture } from './helpers/fixture';
@@ -92,6 +94,27 @@ describe('cli basics', () => {
     const r = await cli([command, '-C', makeTempDir('timeout'), '--timeout', value]);
     expect(r.err).toContain('--timeout must be a positive number of minutes');
     expect(r.code).not.toBe(0);
+  });
+
+  it('list and static report a leftover journal instead of restoring it; clean restores it', async () => {
+    // Commands that run nothing must not pull a fault out from under a run that is planting.
+    repo = copyFixture('js-vitest');
+    plant(repo.root, {
+      tool: 'vitest',
+      tier: 'reach',
+      marker: { id: 'abc123', snake: 'falsegreen_abc123', pascal: 'Falsegreenabc123' },
+      files: [{ path: 'test/falsegreen_abc123.test.ts', content: 'x' }],
+      appends: [],
+      description: 'planted',
+    });
+    for (const command of ['list', 'static']) {
+      const r = await cli([command, '-C', repo.root]);
+      expect(r.err).toContain('run `falsegreen clean`');
+      expect(existsSync(journalPath(repo.root))).toBe(true);
+    }
+    const clean = await cli(['clean', '-C', repo.root]);
+    expect(clean.out).toBe('restored: test/falsegreen_abc123.test.ts\n');
+    expect(existsSync(journalPath(repo.root))).toBe(false);
   });
 
   it('accepts the required-check options and rejects a bad mode', async () => {

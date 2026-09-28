@@ -7,7 +7,7 @@ import { faultContext, refusal } from '../local/replay';
 import { load, type IO, type Selection } from './common';
 
 export function listCommand(sel: Selection, io: IO): number {
-  const { root, cfg, gates } = load(sel, io);
+  const { root, cfg, gates } = load(sel, io, { restore: false });
   const tracked = trackedFiles(root);
   if (gates.length === 0) io.out('no gates found\n');
   for (const gate of gates) {

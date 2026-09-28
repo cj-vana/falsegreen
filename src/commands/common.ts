@@ -1,10 +1,11 @@
 /** What every command needs: the repository, its config and workflows, and the gates in them. */
-import { realpathSync } from 'node:fs';
+import { existsSync, realpathSync } from 'node:fs';
 import { resolve } from 'node:path';
 
 import type { ResolvedConfig } from '../config/load';
 import { loadConfig } from '../config/load';
 import { GitError, originSlug, repoRoot } from '../core/git';
+import { journalPath } from '../plant/journal';
 import { recoverJournal } from '../plant/planter';
 import { resolveAll, type EmptyStep, type Gate } from '../resolve/gates';
 import type { WorkflowModel } from '../workflow/model';
@@ -78,9 +79,21 @@ export function recover(root: string, io: IO): void {
     io.err(`restored files left by an interrupted falsegreen run: ${restored.join(', ')}\n`);
 }
 
-export function load(sel: Selection, io: IO): Loaded {
+/**
+ * `restore: false` is for commands that plant nothing (list, static): a journal they find may
+ * belong to a run that is planting right now, so they only say it is there.
+ */
+export function load(sel: Selection, io: IO, opts: { restore?: boolean } = {}): Loaded {
   const root = findRoot(sel.cwd);
-  recover(root, io);
+  if (opts.restore === false) {
+    if (existsSync(journalPath(root))) {
+      io.err(
+        'a falsegreen run is planting faults in this repository, or one was interrupted: its files may still be in the tree. Once it has stopped, run `falsegreen clean`.\n',
+      );
+    }
+  } else {
+    recover(root, io);
+  }
   const cfg = loadConfig(root, sel.config);
   const workflows = loadWorkflows(root, sel.workflows);
   if (workflows.length === 0)

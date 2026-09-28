@@ -2,8 +2,8 @@
 import { recoverJournal } from '../plant/planter';
 import { findRoot, type IO } from './common';
 
-export function cleanCommand(cwd: string, io: IO): number {
-  const restored = recoverJournal(findRoot(cwd));
+export function cleanCommand(cwd: string, io: IO, opts: { force?: boolean } = {}): number {
+  const restored = recoverJournal(findRoot(cwd), opts);
   io.out(restored ? `restored: ${restored.join(', ')}\n` : 'nothing to restore\n');
   return 0;
 }

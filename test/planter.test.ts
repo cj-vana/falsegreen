@@ -1,3 +1,4 @@
+import { spawn } from 'node:child_process';
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 
@@ -6,6 +7,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import { statusPorcelain, trackedFiles } from '../src/core/git';
 import type { Marker } from '../src/core/marker';
 import type { Fault } from '../src/faults/types';
+import { journalPath, type Journal } from '../src/plant/journal';
 import {
   PlantError,
   checkPlantable,
@@ -157,6 +159,52 @@ describe('journal recovery', () => {
     ]);
     expect(statusPorcelain(r.root)).toBe('');
     expect(recoverJournal(r.root)).toBeUndefined();
+  });
+
+  it('keeps edits made after the crash: a removed planted line and new code both survive', () => {
+    const r = newRepo();
+    plant(r.root, fault());
+    // The user found `mod falsegreen_abc123;`, deleted it, and kept working.
+    r.write('src/lib.rs', 'pub fn f() {}\npub fn user_work() {}\n');
+    recoverJournal(r.root);
+    expect(readFileSync(join(r.root, 'src/lib.rs'), 'utf8')).toBe(
+      'pub fn f() {}\npub fn user_work() {}\n',
+    );
+    expect(existsSync(join(r.root, 'src/falsegreen_abc123.py'))).toBe(false);
+    expect(existsSync(journalPath(r.root))).toBe(false);
+  });
+
+  it('takes out only the planted line when the file was edited around it', () => {
+    const r = newRepo();
+    plant(r.root, fault());
+    const planted = readFileSync(join(r.root, 'src/lib.rs'), 'utf8');
+    r.write('src/lib.rs', `// user comment\n${planted}`);
+    recoverJournal(r.root);
+    expect(readFileSync(join(r.root, 'src/lib.rs'), 'utf8')).toBe(
+      '// user comment\npub fn f() {}\n',
+    );
+  });
+
+  it('leaves a live run alone: another command must not pull its fault out', () => {
+    const r = newRepo();
+    plant(r.root, fault());
+    // Stand in for a second falsegreen process by giving the journal a live owner.
+    const other = spawn('sleep', ['30']);
+    try {
+      const journal = JSON.parse(readFileSync(journalPath(r.root), 'utf8')) as Journal;
+      writeFileSync(
+        journalPath(r.root),
+        JSON.stringify({ ...journal, owner: { ...journal.owner, pid: other.pid } }),
+      );
+      expect(() => recoverJournal(r.root)).toThrow(
+        `another falsegreen run (pid ${other.pid}) is planting faults in this repository`,
+      );
+      expect(existsSync(join(r.root, 'src/falsegreen_abc123.py'))).toBe(true);
+      expect(recoverJournal(r.root, { force: true })).toBeDefined();
+      expect(statusPorcelain(r.root)).toBe('');
+    } finally {
+      other.kill();
+    }
   });
 
   it('refuses to plant while a journal from another run exists', () => {

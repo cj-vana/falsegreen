@@ -110,7 +110,9 @@ function progress(io: IO, quiet: boolean): (e: ProgressEvent) => void {
 
 export async function runCommand(opts: RunOptions, io: IO): Promise<RunOutcome> {
   const startedAt = new Date();
-  const { root, cfg, workflows, gates, emptySteps, errors } = load(opts, io);
+  const { root, cfg, workflows, gates, emptySteps, errors } = load(opts, io, {
+    restore: opts.command !== 'static',
+  });
   const found = staticFindings(workflows, gates, emptySteps);
   const required = await requiredCheckFindings(root, workflows, gates, opts, io);
 

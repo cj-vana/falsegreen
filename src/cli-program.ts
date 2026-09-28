@@ -240,7 +240,13 @@ export function buildProgram(io: CliIO = defaultIO()): Command {
     .command('clean')
     .description('restore files left behind by an interrupted run')
     .addOption(cwdOption())
-    .action((o: { cwd: string }) => guarded(() => cleanCommand(o.cwd, io))());
+    .option(
+      '--force',
+      'restore even though the run that planted them still looks alive (its pid was reused)',
+    )
+    .action((o: { cwd: string; force?: boolean }) =>
+      guarded(() => cleanCommand(o.cwd, io, { force: o.force === true }))(),
+    );
   program
     .command('init')
     .description('write falsegreen.config.yml and a workflow that runs falsegreen')

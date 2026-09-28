@@ -14,6 +14,7 @@ import {
   statSync,
   writeFileSync,
 } from 'node:fs';
+import { hostname } from 'node:os';
 import { isAbsolute, join, posix } from 'node:path';
 
 import { addIntentToAdd, isModified, resetPaths, statusPorcelain } from '../core/git';
@@ -81,6 +82,39 @@ function removeDerivatives(root: string, journal: Journal): void {
   }
 }
 
+/**
+ * Takes the appended text out of a file without touching anything else in it. The file was clean
+ * when the text went in, but the user may have edited it since (after a crash, or during a long
+ * run), so the original bytes are written back only when nothing but the text changed.
+ */
+function undoAppend(root: string, entry: Journal['appended'][number]): void {
+  const full = join(root, entry.path);
+  if (!existsSync(full)) return;
+  const original = Buffer.from(entry.original, 'base64');
+  // Journals written before the text was recorded can only be restored byte for byte.
+  if (entry.text === undefined) return writeFileSync(full, original);
+  const current = readFileSync(full);
+  if (current.equals(Buffer.concat([original, Buffer.from(entry.text)]))) {
+    return writeFileSync(full, original);
+  }
+  const text = current.toString('utf8');
+  const at = text.lastIndexOf(entry.text);
+  if (at >= 0) writeFileSync(full, text.slice(0, at) + text.slice(at + entry.text.length));
+}
+
+/** True once nothing falsegreen put in the tree is left: planted files gone, appended text gone. */
+function undone(root: string, journal: Journal): boolean {
+  return (
+    journal.created.every((path) => !existsSync(join(root, path))) &&
+    journal.appended.every(
+      (a) =>
+        a.text === undefined ||
+        !existsSync(join(root, a.path)) ||
+        !readFileSync(join(root, a.path), 'utf8').includes(a.text),
+    )
+  );
+}
+
 function restore(root: string, journal: Journal): void {
   const problems: string[] = [];
   try {
@@ -89,9 +123,7 @@ function restore(root: string, journal: Journal): void {
     problems.push((err as Error).message);
   }
   for (const path of journal.created) rmSync(join(root, path), { force: true });
-  for (const { path, original } of journal.appended) {
-    writeFileSync(join(root, path), Buffer.from(original, 'base64'));
-  }
+  for (const entry of journal.appended) undoAppend(root, entry);
   removeDerivatives(root, journal);
   for (const dir of [...journal.createdDirs].reverse()) {
     const full = join(root, dir);
@@ -101,13 +133,19 @@ function restore(root: string, journal: Journal): void {
       problems.push(`could not remove ${dir}/: it now contains ${left.join(', ')}`);
     else rmdirSync(full);
   }
-  removeJournal(root);
+  // The journal goes only once falsegreen's own changes are gone; otherwise it stays, so the
+  // next run or `falsegreen clean` still knows what to take out.
+  if (undone(root, journal)) removeJournal(root);
+  else problems.push('the journal was kept in .git so `falsegreen clean` can try again');
 
-  const touched = [
-    ...journal.created,
-    ...journal.appended.map((a) => a.path),
-    ...journal.createdDirs,
-  ];
+  // An appended file the user edited since stays modified, with their edits; only files that are
+  // back to their original bytes should look clean to git.
+  const pristine = journal.appended.filter(
+    (a) =>
+      existsSync(join(root, a.path)) &&
+      readFileSync(join(root, a.path)).equals(Buffer.from(a.original, 'base64')),
+  );
+  const touched = [...journal.created, ...pristine.map((a) => a.path), ...journal.createdDirs];
   const status = statusPorcelain(root, touched).trim();
   if (status !== '') problems.push(`git status still shows: ${status.replace(/\n/g, ', ')}`);
   if (problems.length > 0) {
@@ -121,13 +159,15 @@ export function plant(root: string, fault: Fault, opts: { intentToAdd?: boolean 
 
   const created = fault.files.map((f) => f.path);
   const journal: Journal = {
-    version: 1,
+    version: 2,
     markerId: fault.marker.id,
+    owner: { pid: process.pid, host: hostname() },
     created,
     createdDirs: missingDirs(root, created),
     appended: fault.appends.map((a) => ({
       path: a.path,
       original: readFileSync(join(root, a.path)).toString('base64'),
+      text: a.text,
     })),
     intentToAdd: (opts.intentToAdd ?? true) ? created : [],
   };
@@ -154,10 +194,33 @@ export function plant(root: string, fault: Fault, opts: { intentToAdd?: boolean 
   return planted;
 }
 
-/** Restores the tree from a journal left by a run that died; the restored paths, if any. */
-export function recoverJournal(root: string): string[] | undefined {
+/** The pid of another falsegreen process on this machine that owns the journal and still runs. */
+function liveOwner(journal: Journal): number | undefined {
+  const owner = journal.owner;
+  // A journal with this process's pid was left by an earlier process that had the same pid.
+  if (!owner || owner.host !== hostname() || owner.pid === process.pid) return undefined;
+  try {
+    process.kill(owner.pid, 0);
+    return owner.pid;
+  } catch (err) {
+    // EPERM: the process exists but belongs to someone else.
+    return (err as NodeJS.ErrnoException).code === 'EPERM' ? owner.pid : undefined;
+  }
+}
+
+/**
+ * Restores the tree from a journal left by a run that died; the restored paths, if any. A journal
+ * whose run is still alive is left alone unless `force` is set.
+ */
+export function recoverJournal(root: string, opts: { force?: boolean } = {}): string[] | undefined {
   const journal = readJournal(root);
   if (!journal) return undefined;
+  const owner = liveOwner(journal);
+  if (owner !== undefined && opts.force !== true) {
+    throw new PlantError(
+      `another falsegreen run (pid ${owner}) is planting faults in this repository; wait for it to finish, or stop it and run \`falsegreen clean\``,
+    );
+  }
   restore(root, journal);
   return [...journal.created, ...journal.appended.map((a) => a.path)];
 }

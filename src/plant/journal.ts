@@ -18,14 +18,19 @@ import { join } from 'node:path';
 import { gitDir } from '../core/git';
 
 export interface Journal {
-  version: 1;
+  version: 1 | 2;
   markerId: string;
+  /** The run that planted, so no other command pulls its fault out while it is still running. */
+  owner?: { pid: number; host: string };
   /** Files the planting creates, repo-relative. */
   created: string[];
   /** Directories the planting creates, shallowest first. */
   createdDirs: string[];
-  /** Files the planting appends to, with their original bytes (base64). */
-  appended: { path: string; original: string }[];
+  /**
+   * Files the planting appends to: their original bytes (base64) and the text appended, so a
+   * restore can take out exactly that text and keep anything the user wrote since.
+   */
+  appended: { path: string; original: string; text?: string }[];
   /** Paths added to the index with --intent-to-add. */
   intentToAdd: string[];
 }
