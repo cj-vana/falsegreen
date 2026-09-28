@@ -52,6 +52,16 @@ describe('cli basics', () => {
     expect(r.out.trim()).toBe(version);
   });
 
+  it.each(['run', 'list', 'clean', 'init'])(
+    "%s --help names the default directory instead of printing this machine's path",
+    async (command) => {
+      const r = await cli([command, '--help']);
+      // Help wraps long lines, so compare with the whitespace collapsed.
+      expect(r.out.replace(/\s+/g, ' ')).toContain('(default: the current directory)');
+      expect(r.out).not.toContain(process.cwd());
+    },
+  );
+
   it('runCli parses the argv it is given', async () => {
     const exit = vi.spyOn(process, 'exit').mockImplementation(((code?: number) => {
       throw new Error(`exit ${code}`);

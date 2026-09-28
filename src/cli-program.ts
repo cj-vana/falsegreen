@@ -46,9 +46,16 @@ function selection(o: CommonOpts): Selection {
   return sel;
 }
 
+/** `-C`, with the default described in words so help never prints the machine's own path. */
+const cwdOption = (): Option =>
+  new Option('-C, --cwd <dir>', 'run as if started in <dir>').default(
+    process.cwd(),
+    'the current directory',
+  );
+
 function withSelection(cmd: Command): Command {
   return cmd
-    .option('-C, --cwd <dir>', 'run as if started in <dir>', process.cwd())
+    .addOption(cwdOption())
     .option('--config <path>', 'config file (default: falsegreen.config.yml)')
     .option('--workflow <file...>', 'only these workflow files')
     .option('--job <id...>', 'only these jobs (id, name or check name)')
@@ -218,12 +225,12 @@ export function buildProgram(io: CliIO = defaultIO()): Command {
   program
     .command('clean')
     .description('restore files left behind by an interrupted run')
-    .option('-C, --cwd <dir>', 'run as if started in <dir>', process.cwd())
+    .addOption(cwdOption())
     .action((o: { cwd: string }) => guarded(() => cleanCommand(o.cwd, io))());
   program
     .command('init')
     .description('write falsegreen.config.yml and a workflow that runs falsegreen')
-    .option('-C, --cwd <dir>', 'run as if started in <dir>', process.cwd())
+    .addOption(cwdOption())
     .action((o: { cwd: string }) => guarded(() => initCommand(o.cwd, io))());
   return program;
 }
