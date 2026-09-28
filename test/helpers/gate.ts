@@ -45,6 +45,7 @@ export function fakeGate(over: Partial<Gate> = {}): Gate {
     unresolved: [],
     notes: [],
     ifPresent: [],
+    stagedOnly: [],
     job,
     step,
     ...over,

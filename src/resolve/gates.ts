@@ -69,6 +69,7 @@ export interface Gate {
   unresolved: string[];
   notes: string[];
   ifPresent: IfPresentUse[];
+  stagedOnly: StagedOnlyUse[];
   /** A command that must never be replayed (`npm publish`, `git push`, ...). */
   unsafe?: string;
   fromAction?: string;
@@ -83,7 +84,14 @@ export interface IfPresentUse {
   missing: boolean;
 }
 
-/** A step that looks like a check but runs none (today: every script it names is missing). */
+/** `pre-commit run` without --all-files, or lint-staged: both check only staged files. */
+export interface StagedOnlyUse {
+  trace: ScriptTrace;
+  cmd: SimpleCommand;
+  runner: 'pre-commit' | 'lint-staged';
+}
+
+/** A step that looks like a check but runs none: its scripts are missing, or it checks staged files. */
 export interface EmptyStep {
   workflow: string;
   jobId: string;
@@ -91,6 +99,7 @@ export interface EmptyStep {
   loc: SourceLocation;
   runLine?: number;
   ifPresent: IfPresentUse[];
+  stagedOnly: StagedOnlyUse[];
   job: JobModel;
   step: StepModel;
 }
@@ -231,7 +240,19 @@ interface Walk {
   traces: ScriptTrace[];
   notes: string[];
   ifPresent: IfPresentUse[];
+  stagedOnly: StagedOnlyUse[];
   unsafe?: string;
+}
+
+const STAGED_ALL = ['--all-files', '-a', '--files', '--from-ref', '--source'];
+
+function stagedOnlyRunner(argv: string[]): StagedOnlyUse['runner'] | undefined {
+  const [head, sub] = stripWrappers(argv).argv;
+  if (head === 'lint-staged') return 'lint-staged';
+  if (head === 'pre-commit' && sub === 'run' && !argv.some((a) => STAGED_ALL.includes(a))) {
+    return 'pre-commit';
+  }
+  return undefined;
 }
 
 function normalizeDir(cwd: string, target: string): string {
@@ -281,6 +302,8 @@ function walkScript(
     if (call?.ifPresent) {
       w.ifPresent.push({ trace, cmd, missing: !scriptFor(w.root, call.dir, call.name) });
     }
+    const runner = stagedOnlyRunner(argv);
+    if (runner) w.stagedOnly.push({ trace, cmd, runner });
     if (resolveCommand(argv, dir, via, w, depth)) trace.gateCommands.push(cmd);
   }
   return trace.gateCommands.length > 0;
@@ -515,7 +538,15 @@ function resolveStep(
 
   const run = step.run === undefined ? undefined : substitute(step.run, full);
   const stepName = displayName(step, run?.text, full);
-  const w: Walk = { root, tracked, invocations: [], traces: [], notes, ifPresent: [] };
+  const w: Walk = {
+    root,
+    tracked,
+    invocations: [],
+    traces: [],
+    notes,
+    ifPresent: [],
+    stagedOnly: [],
+  };
   let kind: Gate['kind'] = 'run';
 
   if (run) {
@@ -565,13 +596,14 @@ function resolveStep(
     });
   }
   if (w.invocations.length === 0) {
-    if (!w.ifPresent.some((u) => u.missing)) return undefined;
+    if (!w.ifPresent.some((u) => u.missing) && w.stagedOnly.length === 0) return undefined;
     const empty: EmptyStep = {
       workflow: wf.file,
       jobId: job.id,
       stepName,
       loc: step.loc,
       ifPresent: w.ifPresent,
+      stagedOnly: w.stagedOnly,
       job,
       step,
     };
@@ -597,6 +629,7 @@ function resolveStep(
     unresolved: run?.unresolved ?? [],
     notes: w.notes,
     ifPresent: w.ifPresent,
+    stagedOnly: w.stagedOnly,
     job,
     step,
   };

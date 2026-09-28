@@ -1,10 +1,42 @@
 {
-  "requires": ["go", "gofumpt"],
-  "gates": [
-    { "job": "format", "step": "Run gofmt -l .", "tool": "gofmt", "reach": "caught", "semantic": "survived" },
-    { "job": "format", "step": "Run test -z \"$(gofmt -l .)\"", "tool": "gofmt", "reach": "survived", "semantic": "unattributed" },
-    { "job": "format", "step": "Run gofmt -d .", "tool": "gofmt", "reach": "caught", "semantic": "caught" },
-    { "job": "format", "step": "Run gofumpt -d .", "tool": "gofumpt", "reach": "caught", "semantic": "caught" }
+  "requires": [
+    "go",
+    "gofumpt"
   ],
-  "static": []
+  "gates": [
+    {
+      "job": "format",
+      "step": "Run gofmt -l .",
+      "tool": "gofmt",
+      "reach": "caught",
+      "semantic": "survived"
+    },
+    {
+      "job": "format",
+      "step": "Run test -z \"$(gofmt -l .)\"",
+      "tool": "gofmt",
+      "reach": "survived",
+      "semantic": "unattributed"
+    },
+    {
+      "job": "format",
+      "step": "Run gofmt -d .",
+      "tool": "gofmt",
+      "reach": "caught",
+      "semantic": "caught"
+    },
+    {
+      "job": "format",
+      "step": "Run gofumpt -d .",
+      "tool": "gofumpt",
+      "reach": "caught",
+      "semantic": "caught"
+    }
+  ],
+  "static": [
+    {
+      "rule": "masked-exit",
+      "step": "Run test -z \"$(gofmt -l .)\""
+    }
+  ]
 }

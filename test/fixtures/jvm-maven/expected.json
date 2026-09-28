@@ -1,10 +1,42 @@
 {
-  "requires": ["java", "mvn"],
-  "gates": [
-    { "job": "build", "step": "Run mvn -B verify", "tool": "maven-test", "reach": "caught", "semantic": "caught" },
-    { "job": "build", "step": "Run mvn -B verify", "tool": "maven-lint", "reach": "caught", "semantic": "caught" },
-    { "job": "build", "step": "Run mvn -B test -Dmaven.test.failure.ignore=true", "tool": "maven-test", "reach": "caught", "semantic": "survived" },
-    { "job": "build", "step": "Run mvn -B compile", "tool": "maven-compile", "reach": "caught", "semantic": "unjudged" }
+  "requires": [
+    "java",
+    "mvn"
   ],
-  "static": []
+  "gates": [
+    {
+      "job": "build",
+      "step": "Run mvn -B verify",
+      "tool": "maven-test",
+      "reach": "caught",
+      "semantic": "caught"
+    },
+    {
+      "job": "build",
+      "step": "Run mvn -B verify",
+      "tool": "maven-lint",
+      "reach": "caught",
+      "semantic": "caught"
+    },
+    {
+      "job": "build",
+      "step": "Run mvn -B test -Dmaven.test.failure.ignore=true",
+      "tool": "maven-test",
+      "reach": "caught",
+      "semantic": "survived"
+    },
+    {
+      "job": "build",
+      "step": "Run mvn -B compile",
+      "tool": "maven-compile",
+      "reach": "caught",
+      "semantic": "unjudged"
+    }
+  ],
+  "static": [
+    {
+      "rule": "masked-exit",
+      "step": "Run mvn -B test -Dmaven.test.failure.ignore=true"
+    }
+  ]
 }

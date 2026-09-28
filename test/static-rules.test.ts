@@ -69,6 +69,25 @@ jobs:
         run: mypy src
       - name: clean
         run: npx eslint .
+      - name: exit zero
+        run: flake8 --exit-zero src
+      - name: issues exit code
+        run: golangci-lint run --issues-exit-code=0
+      - name: maven ignore
+        run: mvn -B verify -Dmaven.test.failure.ignore=true
+      - name: gofmt substitution
+        run: test -z "$(gofmt -l .)"
+      - name: gofmt assignment
+        shell: bash
+        run: |
+          out=$(gofmt -l .)
+          test -z "$out"
+      - name: pre-commit staged
+        run: pre-commit run
+      - name: pre-commit all
+        run: pre-commit run --all-files
+      - name: lint staged
+        run: npx lint-staged
   b:
     continue-on-error: \${{ matrix.experimental }}
     strategy:
@@ -99,6 +118,8 @@ beforeAll(() => {
         'test:seq': 'vitest run; echo done',
       },
     }),
+    '.pre-commit-config.yaml':
+      'repos:\n  - repo: local\n    hooks:\n      - id: ruff\n        name: ruff\n        entry: ruff check\n        language: system\n',
   });
   const workflows = loadWorkflows(repo.root);
   const { gates, emptySteps } = resolveAll(repo.root, workflows, loadConfig(repo.root), {
@@ -178,6 +199,35 @@ describe('staticFindings', () => {
   it('flags a workflow whose pull_request trigger is path-filtered, once', () => {
     const path = findings.filter((f) => f.rule === 'path-filtered');
     expect(path.map((f) => [f.severity, f.location?.line])).toEqual([['low', 1]]);
+  });
+
+  it('flags flags that turn a failing check into a pass', () => {
+    expect(forStep('exit zero')).toEqual([['masked-exit', 'high', lineOf('flake8 --exit-zero')]]);
+    expect(forStep('issues exit code')).toEqual([
+      ['masked-exit', 'high', lineOf('--issues-exit-code=0')],
+    ]);
+    expect(forStep('maven ignore')).toEqual([
+      ['masked-exit', 'high', lineOf('test.failure.ignore')],
+    ]);
+  });
+
+  it('flags a check whose exit status is lost inside a command substitution', () => {
+    expect(forStep('gofmt substitution')).toEqual([
+      ['masked-exit', 'medium', lineOf('test -z "$(gofmt -l .)"')],
+    ]);
+    // An assignment keeps the status of its substitution, and -e stops on it.
+    expect(forStep('gofmt assignment')).toEqual([]);
+  });
+
+  it('flags checks that only look at staged files, which a CI checkout does not have', () => {
+    // The staged step comes first, so lineOf finds its line and not the --all-files one.
+    expect(forStep('pre-commit staged')).toEqual([
+      ['no-files-checked', 'high', lineOf('run: pre-commit run')],
+    ]);
+    expect(forStep('pre-commit all')).toEqual([]);
+    expect(forStep('lint staged')).toEqual([
+      ['no-files-checked', 'high', lineOf('npx lint-staged')],
+    ]);
   });
 
   it('reports nothing for a plain gate', () => {

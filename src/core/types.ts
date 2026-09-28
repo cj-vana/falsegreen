@@ -33,6 +33,7 @@ export const RULE_IDS = [
   'pipe-swallows-exit',
   'passes-with-no-tests',
   'if-present',
+  'no-files-checked',
   'path-filtered',
   'conditional-gate',
   'not-required',

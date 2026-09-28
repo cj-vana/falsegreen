@@ -4,7 +4,8 @@
  * last command of an && or || list, and a pipeline reports its last command unless pipefail is set.
  */
 import type { Finding, RuleId, Severity, SourceLocation } from '../core/types';
-import type { EmptyStep, Gate, ScriptTrace } from '../resolve/gates';
+import type { EmptyStep, Gate, ScriptTrace, StagedOnlyUse } from '../resolve/gates';
+import { stripWrappers } from '../resolve/wrappers';
 import {
   allCommands,
   words,
@@ -123,6 +124,17 @@ function shellRules(ctx: Context, trace: ScriptTrace, shell: string | undefined)
   lists.forEach((list, li) => {
     for (const cmd of pipelines(list).flatMap((p) => p.commands)) {
       if (words(cmd)[0] === 'set') applySet(words(cmd), state);
+      // `test -z "$(gofmt -l .)"`: the check runs inside $(...) and its status is thrown away.
+      // An assignment (`out=$(gofmt -l .)`) keeps the status, so only commands with argv count.
+      if (cmd.argv.length > 0 && !gates.has(cmd) && hasGate(cmd, gates)) {
+        ctx.add(
+          'masked-exit',
+          'medium',
+          `${where(trace)}\`${trace.text.slice(cmd.start, cmd.end)}\` throws away the exit status of the check inside $(...), so a check that fails without printing anything passes.`,
+          locationOf(ctx, trace, cmd.start),
+          'Assign the output first (out=$(...)) so the step stops when the check fails, then test it.',
+        );
+      }
     }
     const ps = pipelines(list);
     const gateIndex = ps.findLastIndex((p) => pipelineHasGate(p, gates));
@@ -208,6 +220,41 @@ function shellRules(ctx: Context, trace: ScriptTrace, shell: string | undefined)
   });
 }
 
+/** A flag that makes the check exit 0 whatever it finds, and how to fix it; undefined when none. */
+function neverFails(raw: string[]): string | undefined {
+  const argv = stripWrappers(raw).argv;
+  const exe = argv[0];
+  if ((exe === 'flake8' || exe === 'ruff' || exe === 'pylint') && argv.includes('--exit-zero')) {
+    return 'Remove --exit-zero.';
+  }
+  if (exe === 'golangci-lint') {
+    const at = argv.indexOf('--issues-exit-code');
+    const value =
+      at >= 0 ? argv[at + 1] : argv.find((a) => a.startsWith('--issues-exit-code='))?.split('=')[1];
+    if (value === '0') return 'Remove --issues-exit-code=0.';
+  }
+  if (
+    (exe === 'mvn' || exe === 'mvnw') &&
+    argv.some((a) => /^-Dmaven\.test\.failure\.ignore(=true)?$/.test(a))
+  ) {
+    return 'Remove -Dmaven.test.failure.ignore=true.';
+  }
+  return undefined;
+}
+
+function stagedOnlyFindings(ctx: Context, uses: StagedOnlyUse[]): void {
+  for (const use of uses) {
+    const text = use.trace.text.slice(use.cmd.start, use.cmd.end);
+    ctx.add(
+      'no-files-checked',
+      'high',
+      `${where(use.trace)}\`${text}\` checks only staged files, and a CI checkout has nothing staged, so it checks nothing.`,
+      locationOf(ctx, use.trace, use.cmd.start),
+      use.runner === 'pre-commit' ? 'Add --all-files.' : 'Run the linters directly in CI.',
+    );
+  }
+}
+
 const EVENT_CONDITION = /github\.(event_name|ref|ref_name|actor|head_ref|base_ref)\b/;
 
 export function staticFindings(
@@ -283,8 +330,19 @@ export function staticFindings(
             locationOf(ctx, trace, cmd.start),
           );
         }
+        const fix = neverFails(argv);
+        if (fix !== undefined) {
+          ctx.add(
+            'masked-exit',
+            'high',
+            `${where(trace)}\`${argv.join(' ')}\` exits 0 even when the check finds problems.`,
+            locationOf(ctx, trace, cmd.start),
+            fix,
+          );
+        }
       }
     }
+    stagedOnlyFindings(ctx, gate.stagedOnly);
 
     for (const use of gate.ifPresent) {
       ctx.add(
@@ -298,6 +356,7 @@ export function staticFindings(
 
   for (const empty of emptySteps) {
     const ctx: Context = { gate: empty, add: addFor(empty) };
+    stagedOnlyFindings(ctx, empty.stagedOnly);
     for (const use of empty.ifPresent.filter((u) => u.missing)) {
       ctx.add(
         'if-present',

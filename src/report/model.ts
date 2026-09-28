@@ -184,6 +184,7 @@ const EXPLAINS: Finding['rule'][] = [
   'pipe-swallows-exit',
   'passes-with-no-tests',
   'if-present',
+  'no-files-checked',
 ];
 
 /** Points dead and weak gates at the static finding on the same step that explains them. */

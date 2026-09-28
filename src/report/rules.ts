@@ -12,6 +12,7 @@ export const RULE_DESCRIPTIONS: Record<RuleId, string> = {
   'continue-on-error': 'A step or job can fail without failing the run.',
   'passes-with-no-tests': 'The test run passes when it finds no tests.',
   'if-present': 'The step passes when the script it names is missing.',
+  'no-files-checked': 'The check looks only at staged files, and a CI checkout has none.',
   'path-filtered': 'Pull requests can skip the workflow that holds these checks.',
   'conditional-gate': 'A check only runs for some events.',
   'not-required': 'A red run of this check does not block merging.',
