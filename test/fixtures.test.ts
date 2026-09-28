@@ -7,6 +7,8 @@ import { join } from 'node:path';
 
 import { describe, expect, it } from 'vitest';
 
+import { toolDef } from '../src/faults/registry';
+import { TOOL_IDS } from '../src/faults/types';
 import { expected, FIXTURES, fixtureNames, runFixture } from './helpers/fixture';
 import { missing } from './helpers/toolchains';
 
@@ -14,6 +16,12 @@ describe('fixture registry', () => {
   it('every fixture directory has an expected.json', () => {
     const without = fixtureNames().filter((n) => !existsSync(join(FIXTURES, n, 'expected.json')));
     expect(without).toEqual([]);
+  });
+
+  it('every tool id has faults in the registry and at least one fixture', () => {
+    expect([...TOOL_IDS].filter((id) => toolDef(id) === undefined)).toEqual([]);
+    const covered = new Set(fixtureNames().flatMap((n) => expected(n).gates.map((g) => g.tool)));
+    expect([...TOOL_IDS].filter((id) => !covered.has(id))).toEqual([]);
   });
 });
 
