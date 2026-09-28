@@ -71,6 +71,32 @@ describe('dynamicFindings', () => {
     expect(f[1]!.message).toContain('timed out');
   });
 
+  it('shows why a gate was already red', () => {
+    const results = [
+      fakeResult([], {
+        status: 'already-red',
+        reason: 'the step exits 1 without any fault',
+        baseline: {
+          exitCode: 1,
+          durationMs: 900,
+          excerpt: ' RUN  v3\n\n FAIL  test/a.test.ts > adds\nTest Files  1 failed (1)\n\n',
+        },
+      }),
+    ];
+    const [f] = dynamicFindings(results);
+    expect(f!.hint).toBe('Its output ended with: Test Files  1 failed (1)');
+    const report = buildReport({
+      root: '/repo',
+      modes: ['static', 'local'],
+      startedAt: new Date(),
+      gates: results.map((r) => r.gate),
+      results,
+      staticFindings: [],
+      cfg,
+    });
+    expect(report.gates[0]!.baseline).toEqual(results[0]!.baseline);
+  });
+
   it('reports nothing for a gate that caught every fault', () => {
     expect(
       dynamicFindings([fakeResult([fakeRun('reach', 'caught'), fakeRun('semantic', 'caught')])]),

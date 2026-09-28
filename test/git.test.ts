@@ -75,5 +75,16 @@ describe('git helpers', () => {
     expect(originSlug(repo.root)).toBe('cj-vana/falsegreen');
     repo.git('remote', 'set-url', 'origin', 'https://github.com/cj-vana/buttonmash.git');
     expect(originSlug(repo.root)).toBe('cj-vana/buttonmash');
+    repo.git('remote', 'set-url', 'origin', 'ssh://git@ghe.example.com/team/app');
+    expect(originSlug(repo.root)).toBe('team/app');
+  });
+
+  it('has no slug when origin is a local clone', () => {
+    repo = makeRepo();
+    repo.git('remote', 'add', 'origin', 'https://github.com/o/r.git');
+    for (const url of ['/Users/me/Documents/GitHub/chaos', '../chaos', 'file:///srv/git/app.git']) {
+      repo.git('remote', 'set-url', 'origin', url);
+      expect(originSlug(repo.root), url).toBeUndefined();
+    }
   });
 });

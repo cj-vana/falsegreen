@@ -104,6 +104,11 @@ export function originSlug(root: string): string | undefined {
   } catch {
     return undefined;
   }
-  const match = /[:/]([^/:]+)\/([^/]+?)(?:\.git)?\/?$/.exec(url);
+  // https://host/o/r, ssh://git@host/o/r or git@host:o/r. A local path or file:// URL (a clone of
+  // a clone) names no GitHub repository.
+  const match =
+    /^(?:(?:https?|ssh|git):\/\/(?:[^@/]+@)?[^/]+\/|[^@/:]+@[^/:]+:)([^/:]+)\/([^/]+?)(?:\.git)?\/?$/.exec(
+      url,
+    );
   return match ? `${match[1]}/${match[2]}` : undefined;
 }

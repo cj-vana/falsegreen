@@ -38,6 +38,8 @@ export interface GateReport {
   status: GateResult['status'] | 'listed';
   reason?: string;
   notes: string[];
+  /** The run with no fault planted, when there was one. */
+  baseline?: GateResult['baseline'];
   faults: FaultReport[];
 }
 
@@ -87,12 +89,19 @@ export function dynamicFindings(results: GateResult[]): Finding[] {
     const g = r.gate;
     const step = quote(g.stepName);
     if (r.status === 'already-red') {
-      findings.push({
+      const f: Finding = {
         rule: 'already-red',
         severity: 'info',
         message: `${step} fails before any fault is planted (${r.reason ?? 'nonzero exit'}), so falsegreen cannot judge it.`,
         ...where(g),
-      });
+      };
+      const last = r.baseline?.excerpt
+        .split('\n')
+        .map((line) => line.trim())
+        .filter(Boolean)
+        .at(-1);
+      if (last !== undefined) f.hint = `Its output ended with: ${last.slice(0, 200)}`;
+      findings.push(f);
       continue;
     }
     if (r.status === 'unjudged') {
@@ -178,6 +187,7 @@ function gateReport(r: GateResult): GateReport {
   };
   if (g.run !== undefined) report.command = g.run;
   if (r.reason !== undefined) report.reason = r.reason;
+  if (r.baseline !== undefined) report.baseline = r.baseline;
   return report;
 }
 
