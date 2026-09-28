@@ -14,10 +14,10 @@ Severities decide the exit code. With the default `failOn: high`, only high find
 | Rule                                                        | Severity          | Found by        |
 | ----------------------------------------------------------- | ----------------- | --------------- |
 | [dead-gate](#dead-gate)                                     | high              | local, remote   |
-| [weak-gate](#weak-gate)                                     | medium            | local, remote   |
+| [weak-gate](#weak-gate)                                     | medium or high    | local, remote   |
 | [unattributed](#unattributed)                               | low               | local, remote   |
 | [already-red](#already-red)                                 | info              | local           |
-| [unjudged](#unjudged)                                       | info              | local, remote   |
+| [unjudged](#unjudged)                                       | info or high      | local, remote   |
 | [masked-exit](#masked-exit)                                 | high or medium    | static          |
 | [pipe-swallows-exit](#pipe-swallows-exit)                   | medium            | static          |
 | [continue-on-error](#continue-on-error)                     | high or medium    | static          |
@@ -69,6 +69,10 @@ a hint:
 
 Otherwise, look for a rule that is turned off or a config that downgrades it.
 
+It is medium when the reach fault was caught, which shows the tool reads that location. When the
+reach fault was not run (`--tier semantic`) or not judged, the gate may just as well be dead, so the
+finding is high; run with both tiers to tell the two apart.
+
 ### unattributed
 
 The step failed with the fault in place, but its output never named the planted file (every
@@ -87,9 +91,15 @@ installed, or a test that depends on the environment. Fix the step locally, or p
 
 falsegreen could not judge a gate or a fault. The message says why: the step uses a GitHub Action
 (judge it with `falsegreen remote`), a shell that is not installed here, an expression it cannot
-rebuild such as a secret, a step that also publishes or deploys (never replayed), a timeout, a
-step that changes tracked files (falsegreen restores them), a tool with only one kind of fault,
-or a location where a file already exists.
+rebuild such as a secret, a step that publishes, deploys or rewrites the repository, a step in a
+release or deploy job (neither is ever replayed), a timeout, a step that changed tracked files or
+your uncommitted work (falsegreen puts them back), a tool with only one kind of fault, or a
+location where a file already exists.
+
+These are info on their own. When a replay tried gates and not one fault got a verdict, one more
+`unjudged` finding says so at high, because a run that judged nothing proves nothing and should not
+pass. The usual cause is a workflow that runs falsegreen without setting up the toolchains the
+checks need.
 
 ## Shell and workflow findings
 

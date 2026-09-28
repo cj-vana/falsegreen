@@ -57,11 +57,12 @@ npm i -D falsegreen       # or pin it in the project
 ```
 
 Run it from anywhere inside a git repository with workflows under `.github/workflows`. It restores
-every file it plants, but it runs your checks for real, so start from a tree where they pass.
+every file it plants, but it runs your checks for real, so start from a tree where they pass, and
+leave the tree alone until the run finishes.
 
 ```sh
-npx falsegreen list             # every gate it found and the faults it would plant; runs nothing
-npx falsegreen static           # workflow settings and shell code only; runs nothing
+npx falsegreen list             # every gate it found and the faults it would plant; plants nothing
+npx falsegreen static           # workflow settings and shell code only; plants nothing
 npx falsegreen local --job test # replay one job's gates
 npx falsegreen init             # write falsegreen.config.yml and a workflow that runs falsegreen
 ```
@@ -145,17 +146,33 @@ the `tsconfig.json` a type check uses, and the Cargo workspace members a build c
 choice further; `place` in the config overrides it. Planted files are added to the git index with
 `git add -N`, so tools that list files through git see them too.
 
-A step is replayed as a script under its own shell, with its env and working directory, plus
-`CI=true` and `GITHUB_ACTIONS=true` so scripts take the branch they take on a runner. It runs once
-clean (the baseline), then once per fault. A fault counts as caught only when the step fails **and**
-its output names the planted file: every planted file has a `falsegreen_<6 hex>` marker in its
-name. A failure that doesn't mention it is reported as unattributed, not caught.
+A step is replayed as a script under its own shell, with its env and working directory, in the
+environment a runner gives it: `CI` and `GITHUB_ACTIONS` set so scripts take the branch they take
+on a runner, `GITHUB_WORKSPACE` pointing at the repository, and `GITHUB_ENV`, `GITHUB_OUTPUT` and
+the other file commands pointing at throwaway files. Host variables named like credentials
+(`*TOKEN*`, `*SECRET*`, `*PASSWORD*`, `*API_KEY*` and similar) are left out, because a runner hands
+a step secrets only through the workflow's `env:`. Each step runs once clean (the baseline), then
+once per fault. A fault counts as caught only when the step fails **and** its output names the
+planted file: every planted file has a `falsegreen_<6 hex>` marker in its name. A failure that
+doesn't mention it is reported as unattributed, not caught.
 
-Nothing is left behind. Before touching a file, falsegreen writes a journal inside `.git` and
-fsyncs it. Planted files are removed and edited files restored after each run, on Ctrl-C and
-SIGTERM too, and a run that dies harder (SIGKILL, a crash, a closed laptop) is repaired by the next
-run, or by `falsegreen clean`. Steps that also publish or deploy (`npm publish`, `git push`,
-`gh release`, `terraform apply` and similar) are never replayed.
+Nothing is left behind, and nothing of yours is lost:
+
+- Before touching a file, falsegreen writes a journal inside `.git` and fsyncs it. Planted files
+  are removed after each run, on Ctrl-C and SIGTERM too, after the step and everything it started
+  have been stopped. A run that dies harder (SIGKILL, a crash, a closed laptop) is repaired by the
+  next run or by `falsegreen clean`, which takes out only what falsegreen added: edits you made to
+  those files since are kept.
+- The journal names the process that planted. While that process runs, no other falsegreen command
+  touches its files (`list` and `static` only mention them), and `clean --force` is for a process
+  id that was reused.
+- Files with uncommitted changes, and untracked files git does not ignore, are copied before each
+  gate and put back if a step overwrites or deletes them. The gate is then reported as not judged.
+- Steps that publish, deploy or rewrite the repository are never replayed: `npm publish`,
+  `changeset publish`, `semantic-release`, `git push`, `git commit`, `git reset`, `docker push`,
+  `gh release`, `terraform apply` and similar, found through package scripts, Makefiles, script
+  files and `bash -c`. Neither is any step in a job that deploys to an `environment:`, a job named
+  publish, deploy or release, or a workflow that runs only for tags.
 
 ## What it reports
 
@@ -165,10 +182,10 @@ how to fix it.
 | Rule                         | Severity       | Meaning                                                                |
 | ---------------------------- | -------------- | ---------------------------------------------------------------------- |
 | `dead-gate`                  | high           | stayed green with a file that does not parse                           |
-| `weak-gate`                  | medium         | failed on a broken file, stayed green with a real problem              |
+| `weak-gate`                  | medium or high | stayed green with a real problem; high when reach was not judged       |
 | `unattributed`               | low            | failed, but the output never named the planted file                    |
 | `already-red`                | info           | fails before anything is planted                                       |
-| `unjudged`                   | info           | could not be judged here, with the reason                              |
+| `unjudged`                   | info or high   | could not be judged here, with the reason; high when nothing was       |
 | `masked-exit`                | high or medium | `\|\| true`, `-e` pitfalls, `--exit-zero` and friends, `$(check)`      |
 | `pipe-swallows-exit`         | medium         | check piped into another command without pipefail                      |
 | `continue-on-error`          | high or medium | step or job can fail without failing the run                           |
@@ -184,14 +201,15 @@ how to fix it.
 | `skipped-job`                | medium         | remote: the job was skipped on the throwaway branch                    |
 | `required-gate-passed`       | high           | remote: a required check passed with faults planted                    |
 
-Reports go to `falsegreen-report/`: `results.json` (everything, including each run's output
-excerpt), `summary.md`, and with `--formats sarif`, `results.sarif` for code scanning. Inside
+Reports go to `falsegreen-report/`, which carries its own `.gitignore` so the next run's checks
+skip it: `results.json` (everything, including each run's output excerpt, with token-shaped strings
+redacted), `summary.md`, and with `--formats sarif`, `results.sarif` for code scanning. Inside
 GitHub Actions, findings are also printed as annotations on the workflow file.
 
 | Exit code | Meaning                                                  |
 | --------- | -------------------------------------------------------- |
 | 0         | no finding at or above `--fail-on` (default `high`)      |
-| 1         | at least one finding at or above it                      |
+| 1         | at least one finding at or above it, including a replay where no fault got a verdict |
 | 2         | falsegreen could not finish: bad config, not a git repo  |
 
 ## Tools
@@ -239,8 +257,10 @@ npx falsegreen remote --yes    # pushes two throwaway branches and waits for the
 It commits the reach faults to one branch and the semantic faults to another through the Git Data
 API (nothing touches your working tree), starts the workflows, and judges each job by its
 conclusion. A job that passes with faults in place is a dead or weak gate, and a required check
-that passes that way is reported on its own. The branches are deleted afterwards; `--delete-runs`
-removes the runs too.
+that passes that way is reported on its own. Afterwards it cancels the runs the branches started,
+closes its pull requests and deletes the branches, also when interrupted with Ctrl-C or when the
+job running it is cancelled; `--delete-runs` removes the runs too. Anything it could not clean up
+is listed, and fails the run.
 
 What it can start depends on the token:
 
@@ -251,9 +271,13 @@ What it can start depends on the token:
   workflows that have `workflow_dispatch` and skips the rest, saying why. Pull requests it opens
   would wait for someone to approve their runs.
 
-Remote mode refuses to push when that would start a workflow that deploys or publishes: one with
-an `environment:`, a deploy or release action, or a publishing command. Name such workflows in
-`remote.allow` if the push is safe anyway.
+The plan lists every workflow the push or the pull request would start, gates or not. Remote mode
+refuses to run when one of them deploys or publishes: a job with an `environment:`, a job named
+publish, deploy or release, a step named publish or deploy, a deploy, pages or release action, a
+reusable workflow it cannot look inside, or a publishing command anywhere in its scripts. Name such
+workflows in `remote.allow` if starting them is safe anyway. GitHub Apps that deploy every pushed
+branch (Vercel and Netlify previews, for example) work outside Actions, so falsegreen cannot see
+them; the throwaway branches will get preview deploys if yours does that.
 
 ## Configuration
 
